@@ -1,13 +1,7 @@
-import { clsx, type ClassValue } from "clsx"
-import { twMerge } from "tailwind-merge"
+/** Room kept clear at the right of the rightmost pane's header, under the floating toolbar. */
+export const TOOLBAR_CLEARANCE = 160;
 
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
-}
-
-/** One retrieved passage: its relevance plus where in the document it came from.
- *  The location fields are absent for documents indexed before structural
- *  metadata existed, so every consumer treats them as optional. */
+/** One retrieved passage. Location fields are absent for documents indexed without structure. */
 export type RetrievalItem = {
   source: string;
   score: number;
@@ -18,7 +12,7 @@ export type RetrievalItem = {
   document?: string;
 };
 
-/** Readable provenance for a citation card: "p. 37 · recital 148". */
+/** Provenance for a citation card: "p. 37 · recital 148". */
 export function locationLabel(item?: RetrievalItem): string {
   if (!item) return '';
   const parts: string[] = [];
@@ -29,17 +23,6 @@ export function locationLabel(item?: RetrievalItem): string {
   return parts.join(' · ');
 }
 
-/** Same thing abbreviated, for the narrow chart axis: "p.37 §148". */
-export function shortLocation(item?: RetrievalItem): string {
-  if (!item) return '';
-  const page = item.page !== undefined ? `p.${item.page}` : '';
-  if (item.recital !== undefined) return `${page} §${item.recital}`.trim();
-  if (item.article !== undefined) return `${page} Art.${item.article}`.trim();
-  return page;
-}
-
-/* ── Conversation turns ──────────────────────────────────────────────────── */
-
 export type Risk = { level: string; score: number; factors: { name: string; weight: number }[] };
 export type Confidence = { level: string; score: number };
 export type Usage = {
@@ -47,13 +30,42 @@ export type Usage = {
   total_tokens: number; context_window: number;
 };
 
-/** Everything the panes need to redisplay one answer without re-querying the
- *  backend. Captured per turn so the transcript can act as an index into past
- *  evidence rather than a second copy of the latest answer. */
+/** retrieved: fetched for the question; internal: a cited provision in the document;
+ *  external: another document; missing: a self-reference no passage resolves to. */
+export type GraphNodeKind = 'retrieved' | 'internal' | 'external' | 'missing';
+
+/** A box in the graph (backend/graph/neighbourhood.py). `depth` is its distance in arrows from a retrieved passage. */
+export type GraphNode = {
+  id: string;
+  node: string;
+  document: string;
+  label: string;
+  kind: GraphNodeKind;
+  depth: number;
+  preview?: string;
+};
+
+/** An arrow: `from` cites `to`. */
+export type GraphEdge = {
+  from: string;
+  to: string;
+  type: string;
+};
+
+export type RefGraphData = {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};
+
+export const EMPTY_GRAPH: RefGraphData = { nodes: [], edges: [] };
+
+/** Everything the panes need to redisplay one answer without re-querying. */
 export type Turn = {
   finding: string;
+  mode: 'naive' | 'basic';  // a naive answer is the passages themselves, so its chat card shows one line
   citations: string[];
   retrieval: RetrievalItem[];
+  graph: RefGraphData;
   risk: Risk;
   confidence: Confidence;
   usage: Usage;
@@ -65,17 +77,10 @@ export type Message = {
   id: number;
   role: 'user' | 'assistant';
   content: string;
-  /** Present only on assistant turns that succeeded. Its absence is what makes
-   *  a bubble non-clickable -- errors and user messages have nothing to restore. */
-  turn?: Turn;
+  turn?: Turn;  // only on answered turns, which makes the bubble clickable
 };
 
-/* ── Document structure ──────────────────────────────────────────────────── */
-
-/** What GET /document/{name}/stats returns. Every key beyond `chunks` is
- *  optional: the backend omits a key entirely when the document has none of
- *  that unit, so a .txt file carries no `articles` and a cover page no
- *  `chapters`. Render what arrives rather than defaulting absent keys to 0. */
+/** GET /document/{name}/stats. The backend omits units a document doesn't have. */
 export type DocStats = {
   chunks: number;
   pages?: number;
@@ -84,9 +89,16 @@ export type DocStats = {
   chapters?: number;
 };
 
-/** The structural units of a document, as one line: "144 pages · 113 articles".
- *  Chunks are omitted -- they are an implementation detail already shown above,
- *  not a property of the source document. */
+/** A loaded document. `indexing` is set while the backend is still processing it. */
+export type Doc = {
+  id: string;
+  name: string;
+  chunks: number;
+  stats?: DocStats;
+  indexing?: { estimateMs: number };
+};
+
+/** "144 pages · 113 articles" */
 export function structuralSummary(stats: DocStats): string {
   const parts: string[] = [];
 
@@ -98,8 +110,7 @@ export function structuralSummary(stats: DocStats): string {
   return parts.join(' · ');
 }
 
-/** Structural stats for one indexed document. Returns null when the document
- *  is unknown to the backend or the call fails -- the caller renders nothing. */
+/** Null when the document is unknown or the call fails. */
 export async function fetchDocStats(name: string): Promise<DocStats | null> {
   try {
     const res = await fetch(
@@ -116,12 +127,22 @@ export async function fetchDocStats(name: string): Promise<DocStats | null> {
   }
 }
 
-/** Strip Private Use Area characters (U+E000–U+F8FF).
- *
- *  PDFs that draw bullets with Symbol or Wingdings map those glyphs into the
- *  PUA, and they survive text extraction as boxes -- U+F0A1 appears 52 times in
- *  Architecture.pdf alone. Applied at render time so documents already indexed
- *  display correctly without being re-ingested. */
+/** Documents already in the index (GET /documents). Null when the backend can't be reached;
+ *  an empty list when it answers without them. */
+export async function fetchDocuments(): Promise<Doc[] | null> {
+  let res: Response;
+  try {
+    res = await fetch('http://localhost:8000/documents');
+  } catch {
+    return null;
+  }
+  if (!res.ok) return [];
+
+  const data: { name: string; chunks: number }[] = await res.json();
+  return data.map(d => ({ id: d.name, name: d.name, chunks: d.chunks }));
+}
+
+/** Drop Private Use Area characters: PDF bullet glyphs (Symbol, Wingdings) that render as boxes. */
 export function stripPua(text: string): string {
-  return text.replace(/[\uE000-\uF8FF]/g, '');
+  return text.replace(/[-]/g, '');
 }

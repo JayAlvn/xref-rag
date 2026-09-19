@@ -1,6 +1,8 @@
-import { useState } from 'react';
-import { Group, Panel, Separator } from 'react-resizable-panels';
-import type { Message } from '../lib/utils';
+import { useRef, useState, type CSSProperties } from 'react';
+import { Group, Panel, Separator, type PanelImperativeHandle } from 'react-resizable-panels';
+import { TOOLBAR_CLEARANCE, type Message } from '../lib/utils';
+import { useFold } from '../lib/useFold';
+import { ChevronDownIcon, ChevronUpIcon } from './Icons';
 import { QueryProgress } from './QueryProgress';
 
 type ChatPaneProps = {
@@ -18,13 +20,22 @@ type ChatPaneProps = {
   onSelectTurn: (message: Message) => void;
   /** Which turn the left-hand panes are currently showing. */
   activeTurnId: number | null;
+  /** Rightmost pane: keep the header's chevron clear of the floating toolbar. */
+  toolbarInset: boolean;
 };
 
 const SOURCE_CHOICES = [2, 3, 4, 6, 8, 10, 12];
 
 /* Fits the scope-and-controls row, a three-line textarea, the model warning
    and the Send button. */
-const COMPOSER_HEIGHT = '232px';
+const COMPOSER_PX = 232;
+const COMPOSER_HEIGHT = `${COMPOSER_PX}px`;
+
+/* Height the conversation folds down to: its header row, chevron included. */
+const CHAT_HEADER = 56;
+
+/* The gap between the conversation and the prompt box (.panel-separator). */
+const GUTTER = 6;
 
 function riskColor(level: string): string {
   if (level === 'high') return '#ef4444';
@@ -41,9 +52,47 @@ function confidenceColor(score: number): string {
 
 export function ChatPane({
   messages, onSend, loading, mode, setMode, activeDoc, sourceCount, setSourceCount,
-  modelLoaded, onSelectTurn, activeTurnId,
+  modelLoaded, onSelectTurn, activeTurnId, toolbarInset,
 }: ChatPaneProps) {
   const [text, setText] = useState('');
+
+  const transcriptPanel = useRef<PanelImperativeHandle | null>(null);
+  const composerPanel = useRef<PanelImperativeHandle | null>(null);
+  const transcriptEl = useRef<HTMLDivElement | null>(null);
+  const groupEl = useRef<HTMLDivElement | null>(null);
+  const transcriptFold = useFold();
+  const [collapsed, setCollapsed] = useState(false);
+  const [pinHeight, setPinHeight] = useState<number | null>(null);
+
+  /* Folds the conversation to its header; reopening restores the default split. Messages
+     keep their open height, so they slide rather than re-flow. */
+  const toggleTranscript = () => {
+    const transcript = transcriptPanel.current;
+    const composer = composerPanel.current;
+    const transcriptBox = transcriptEl.current;
+    const group = groupEl.current;
+    if (!transcript || !composer || !transcriptBox || !group) return;
+
+    const opening = transcript.isCollapsed();
+    let openHeight = transcriptBox.getBoundingClientRect().height;
+    if (opening) openHeight = group.getBoundingClientRect().height - COMPOSER_PX - GUTTER;
+
+    transcriptFold.fold(
+      () => {
+        if (opening) {
+          // The library won't shrink the last panel while those above are collapsed,
+          // so reopen the conversation first, then set the split.
+          transcript.expand();
+          composer.resize(COMPOSER_HEIGHT);
+        } else {
+          transcript.collapse();
+        }
+      },
+      () => setPinHeight(openHeight),
+      () => setPinHeight(null),
+    );
+    setCollapsed(!opening);
+  };
 
   const submit = () => {
     if (!text.trim() || loading) return;
@@ -51,27 +100,37 @@ export function ChatPane({
     setText('');
   };
 
-  const modeButton = (value: 'naive' | 'basic') => (
-    <button
-      type="button"
-      onClick={() => setMode(value)}
-      className="rounded-full px-3 py-1 text-xs font-medium transition-colors"
-      style={
-        mode === value
-          ? { backgroundColor: 'var(--accent-color)', color: 'var(--accent-text)' }
-          : { backgroundColor: 'var(--card-bg)', color: 'var(--text-muted)', border: '1px solid var(--border-color)' }
-      }
-    >
-      {value}
-    </button>
-  );
+  /* One half of the mode switch. The two halves sit in one pill, so a narrow
+     pane can never wrap them onto separate lines. */
+  const modeButton = (value: 'naive' | 'basic') => {
+    let background = 'transparent';
+    let color = 'var(--text-muted)';
+    if (mode === value) {
+      background = 'var(--accent-color)';
+      color = 'var(--accent-text)';
+    }
+    return (
+      <button
+        type="button"
+        onClick={() => setMode(value)}
+        aria-pressed={mode === value}
+        className="rounded-full px-2.5 py-0.5 text-[11px] font-medium leading-4 transition-colors"
+        style={{ backgroundColor: background, color }}
+      >
+        {value}
+      </button>
+    );
+  };
 
-  /* An answered turn is a summary card, not the answer: two lines of gist plus
-     the evidence signals, clickable to pull that turn back into the panes. The
-     full prose lives in FINDING, which is the only surface that shows it. */
+  /* An answered turn: the answer plus its evidence signals. Clicking restores its panes. */
   const answeredTurn = (msg: Message) => {
     const t = msg.turn!;
     const isActive = msg.id === activeTurnId;
+
+    // Naive mode generates nothing: its "answer" is the retrieved passages
+    // pasted together, which Citations already shows, so keep the first line.
+    let text = msg.content;
+    if (t.mode === 'naive') text = msg.content.split('\n\n')[0];
     return (
       <button
         type="button"
@@ -85,7 +144,7 @@ export function ChatPane({
           color: 'var(--text-main)',
         }}
       >
-        <span className="line-clamp-2 break-words text-sm">{msg.content}</span>
+        <span className="whitespace-pre-wrap break-words text-sm">{text}</span>
 
         <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]"
               style={{ color: 'var(--text-muted)' }}>
@@ -119,30 +178,93 @@ export function ChatPane({
     </span>
   );
 
+  const bubbleFor = (msg: Message) => {
+    if (msg.turn) return answeredTurn(msg);
+    return plainBubble(msg);
+  };
+
+  let groupClass = 'h-full w-full';
+  if (transcriptFold.folding) groupClass += ' panels-folding';
+
+  const transcriptStyle: CSSProperties = { backgroundColor: 'var(--panel-bg)', color: 'var(--text-main)' };
+  if (pinHeight !== null) transcriptStyle.height = pinHeight;
+
+  // The messages stay mounted through a fold, so they slide out of view with
+  // the pane instead of vanishing the moment the chevron is pressed.
+  const showMessages = !collapsed || pinHeight !== null;
+
+  // Clear of the toolbar when this is the rightmost pane.
+  let headerStyle: CSSProperties | undefined;
+  if (toolbarInset) headerStyle = { paddingRight: TOOLBAR_CLEARANCE };
+
+  let foldLabel = 'Collapse chat';
+  let chevron = <ChevronUpIcon />;
+  if (collapsed) {
+    foldLabel = 'Expand chat';
+    chevron = <ChevronDownIcon />;
+  }
+
   return (
-    <Group orientation="vertical" className="h-full w-full">
-      {/* Messages */}
-      <Panel id="transcript" minSize={20} className="overflow-hidden rounded-lg border">
-        <div
-          className="h-full space-y-3 overflow-y-auto overflow-x-hidden p-4"
-          style={{ backgroundColor: 'var(--panel-bg)', color: 'var(--text-main)' }}
-        >
-          {messages.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
-              Ask something to begin.
-            </div>
-          ) : (
-            messages.map((msg) => (
-              <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                {msg.turn ? answeredTurn(msg) : plainBubble(msg)}
-              </div>
-            ))
-          )}
-          {loading && (
-            <div className="flex justify-start">
-              <span className="inline-block rounded-2xl px-3.5 py-2 text-sm" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                Generating…
-              </span>
+    <Group orientation="vertical" className={groupClass} elementRef={groupEl}>
+      <Panel
+        id="transcript"
+        minSize="120px"
+        collapsible
+        // Folds to its header, so the chevron stays reachable.
+        collapsedSize={`${CHAT_HEADER}px`}
+        panelRef={transcriptPanel}
+        elementRef={transcriptEl}
+        // Dragging the divider up past minSize folds it too, so read the state
+        // back rather than trusting the button.
+        onResize={() => {
+          const panel = transcriptPanel.current;
+          if (panel) setCollapsed(panel.isCollapsed());
+        }}
+        className="overflow-hidden rounded-lg border"
+        // The library scrolls a panel's content by default; held at its open
+        // height mid-fold, this one has to be clipped instead.
+        style={{ overflow: 'hidden' }}
+      >
+        <div className="flex h-full flex-col" style={transcriptStyle}>
+          <div className="flex shrink-0 items-center justify-between px-5 pt-4 pb-3" style={headerStyle}>
+            <h3 className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
+              Chat
+            </h3>
+            <button
+              onClick={toggleTranscript}
+              className="rounded p-1 transition-all"
+              style={{ color: 'var(--text-muted)' }}
+              title={foldLabel}
+              aria-label={foldLabel}
+              aria-expanded={!collapsed}
+            >
+              {chevron}
+            </button>
+          </div>
+
+          {showMessages && (
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden px-4 pb-4" inert={collapsed}>
+              {messages.length === 0 && (
+                <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
+                  Ask something to begin.
+                </div>
+              )}
+              {messages.map((msg) => {
+                let side = 'justify-start';
+                if (msg.role === 'user') side = 'justify-end';
+                return (
+                  <div key={msg.id} className={`flex ${side}`}>
+                    {bubbleFor(msg)}
+                  </div>
+                );
+              })}
+              {loading && (
+                <div className="flex justify-start">
+                  <span className="inline-block rounded-2xl px-3.5 py-2 text-sm" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                    Generating…
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -150,9 +272,14 @@ export function ChatPane({
 
       <Separator className="panel-separator panel-separator-vertical" />
 
-      {/* Input. Its default height is also its floor: drag the divider up for
-          a long prompt (the textarea takes the extra room), back down to reset. */}
-      <Panel id="composer" defaultSize={COMPOSER_HEIGHT} minSize={COMPOSER_HEIGHT} className="overflow-hidden rounded-lg border">
+      {/* Prompt box. Its default height is also its minimum. */}
+      <Panel
+        id="composer"
+        defaultSize={COMPOSER_HEIGHT}
+        minSize={COMPOSER_HEIGHT}
+        panelRef={composerPanel}
+        className="overflow-hidden rounded-lg border"
+      >
         <div
           className="relative flex h-full flex-col overflow-y-auto p-4"
           style={{ backgroundColor: 'var(--panel-bg)', color: 'var(--text-main)' }}
@@ -160,45 +287,80 @@ export function ChatPane({
           <QueryProgress loading={loading} />
           {/* Scope and query controls share one row above the box they apply
               to. Scope is the easiest thing to get wrong, so it comes first. */}
-          <div
-            className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-2 text-[11px]"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            <span>Asking about</span>
-            <span
-              className="max-w-[10rem] truncate rounded-full px-2 py-0.5 font-medium"
-              style={{
-                backgroundColor: 'var(--card-bg)',
-                border: '1px solid var(--border-color)',
-                color: activeDoc ? 'var(--accent-color)' : 'var(--text-muted)',
-              }}
-              title={activeDoc ?? 'Every indexed document'}
-            >
-              {activeDoc ?? 'all documents'}
-            </span>
-
-            <span className="ml-1">RAG mode:</span>
-            {modeButton('basic')}
-            {modeButton('naive')}
-
-            <label className="ml-auto flex items-center gap-1.5">
-              <span>Sources</span>
-              <select
-                value={sourceCount}
-                onChange={(e) => setSourceCount(Number(e.target.value))}
-                className="rounded-full px-2 py-1 text-xs font-medium outline-none cursor-pointer"
+          <div className="mb-2 flex flex-col gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            {/* The scope gets a line of its own; a long file name truncates. */}
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="shrink-0">Asking about</span>
+              <span
+                className="min-w-0 truncate rounded-full px-2 py-0.5 font-medium"
                 style={{
                   backgroundColor: 'var(--card-bg)',
                   border: '1px solid var(--border-color)',
-                  color: 'var(--text-main)',
+                  color: activeDoc ? 'var(--accent-color)' : 'var(--text-muted)',
                 }}
-                title="How many passages to retrieve and cite"
+                title={activeDoc ?? 'Every indexed document'}
               >
-                {SOURCE_CHOICES.map(n => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
-            </label>
+                {activeDoc ?? 'all documents'}
+              </span>
+            </div>
+
+            {/* Query settings. Each label stays with its control, so a narrow
+                pane wraps between the two groups, never inside one. */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <span>RAG mode</span>
+                <div
+                  className="flex rounded-full p-0.5"
+                  style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--border-color)' }}
+                  role="group"
+                  aria-label="RAG mode"
+                >
+                  {modeButton('basic')}
+                  {modeButton('naive')}
+                </div>
+              </div>
+
+              <label className="ml-auto flex items-center gap-1.5">
+                <span>Sources</span>
+                {/* appearance: none replaces the native widget (white on Linux); the arrow is drawn here. */}
+                <span className="relative inline-flex items-center">
+                  <select
+                    value={sourceCount}
+                    onChange={(e) => setSourceCount(Number(e.target.value))}
+                    className="cursor-pointer rounded-full py-0.5 pl-2 pr-5 text-[11px] font-medium leading-4 outline-none"
+                    style={{
+                      appearance: 'none',
+                      WebkitAppearance: 'none',
+                      backgroundColor: 'var(--card-bg)',
+                      border: '1px solid var(--border-color)',
+                      color: 'var(--text-main)',
+                    }}
+                    title="How many passages to retrieve and cite"
+                  >
+                    {SOURCE_CHOICES.map(n => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                  <svg
+                    className="pointer-events-none absolute right-1.5"
+                    width="8"
+                    height="8"
+                    viewBox="0 0 10 10"
+                    aria-hidden="true"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    <path
+                      d="M2 3.5 L5 6.5 L8 3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+              </label>
+            </div>
           </div>
 
           <textarea

@@ -20,6 +20,9 @@ export type GpuStats = {
 
 export type CpuStats = {
   util: number;
+  // null when the machine exposes no CPU temperature sensor (common on
+  // Windows and in VMs); missing entirely from an older backend.
+  temp_c?: number | null;
   ram_used_gb: number;
   ram_total_gb: number;
 };
@@ -38,15 +41,7 @@ export type MachineStats = {
   model: ModelStats | null;
 };
 
-export type Timings = {
-  retrieval_ms: number;
-  generation_ms: number;
-};
-
-/** Poll the backend's hardware readings.
- *
- *  Fast while a query is running, slow when idle — idle polling exists only to
- *  notice the model being evicted, so the UI can warn before the next send. */
+/** Poll the backend's hardware readings: fast during a query, slow when idle. */
 export function useMachineStats(busy: boolean): MachineStats | null {
   const [stats, setStats] = useState<MachineStats | null>(null);
 
@@ -75,13 +70,4 @@ export function useMachineStats(busy: boolean): MachineStats | null {
   }, [busy]);
 
   return stats;
-}
-
-/** "Intel(R) Core(TM) i5-9400F CPU @ 2.90GHz" -> "Intel Core i5-9400F" */
-export function tidyCpu(name: string): string {
-  return name
-    .replace(/\((R|TM)\)/g, '')
-    .replace(/\s+CPU\s*@.*$/, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
 }
