@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    fraud_rag_ui_lib::run()
+    xref_rag_lib::run()
 }

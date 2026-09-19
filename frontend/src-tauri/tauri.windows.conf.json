@@ -1,0 +1,15 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "xref-rag",
+        "width": 1690,
+        "height": 830,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "center": true,
+        "transparent": true
+      }
+    ]
+  }
+}

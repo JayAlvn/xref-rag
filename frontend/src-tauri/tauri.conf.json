@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "fraud-rag-ui",
+  "productName": "xref-rag",
   "version": "0.1.0",
-  "identifier": "com.ubuntu.fraud-rag-ui",
+  "identifier": "com.jayalvn.xref-rag",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -10,11 +10,15 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "fraud-rag-ui",
-        "width": 800,
-        "height": 600
+        "title": "xref-rag",
+        "width": 1690,
+        "height": 830,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "center": true
       }
     ],
     "security": {
