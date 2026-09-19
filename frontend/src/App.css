@@ -1,28 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (&:is(.dark *));
-
 @theme inline {
   --font-sans: system-ui, -apple-system, sans-serif;
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-border: var(--border);
-}
-
-:root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --border: oklch(0.922 0 0);
-  --radius: 0.625rem;
 }
 
 @layer base {
@@ -33,11 +13,16 @@
     margin: 0;
     padding: 0;
   }
+
+  /* Lets the native frosted effect show through on macOS/Windows; the app root paints the surface. */
+  html,
+  body,
+  #root {
+    background: transparent;
+  }
 }
 
-/* Separators are the gutters between the rounded panes: a transparent strip the
-   app background shows through. On hover or keyboard focus a thin accent line
-   appears in the middle, so the gutter keeps its size and nothing shifts. */
+/* Gutters between panes; an accent line shows on hover/focus without resizing them. */
 .panel-separator {
   flex-shrink: 0;
   position: relative;
@@ -64,9 +49,7 @@
   background-color: var(--accent-color);
 }
 
-/* In a vertical group the gutter runs horizontally, so its size belongs to
-   height instead of width -- without this it inherits width: 6px and the
-   handle cannot be grabbed across the pane. */
+/* A vertical group's gutter runs horizontally, so it needs a height, not a width. */
 .panel-separator-vertical {
   width: 100%;
   height: 6px;
@@ -87,11 +70,8 @@
   overflow: hidden;
 }
 
-/* Query in flight. The backend answers in one response, so the UI can't know
-   how far along a query is. The bar trickles toward 90% and only runs to the
-   end when the answer arrives -- reaching the end is the one moment its
-   position is real. It runs along the top edge of the composer pane, clipped
-   by the pane's rounded corners. The phase classes are set by QueryProgress.tsx. */
+/* Query progress (QueryProgress.tsx). The backend answers in one response, so the bar
+   trickles toward 90% and completes when the answer arrives. */
 .query-progress {
   position: absolute;
   top: 0;
@@ -110,9 +90,7 @@
   transform-origin: left;
 }
 
-/* Heads for 90% and never quite arrives: most of the distance goes in the
-   first few seconds, then the ease-out makes the rest crawl, so a slow query
-   still shows movement. 30s is the pace -- raise it if queries run longer. */
+/* Most of the distance in the first seconds, then a crawl; 30s sets the pace. */
 .query-progress--running .query-progress-bar {
   transform: scaleX(0.9);
   transition: transform 30s cubic-bezier(0.08, 0.6, 0.2, 1);
@@ -139,6 +117,164 @@
   }
 
   .query-progress--done .query-progress-bar {
+    transition: none;
+  }
+}
+
+/* Cross-reference graph (RefGraph.tsx). The canvas pans, so it shows a grab
+   cursor and takes touch gestures over from the browser. */
+.refgraph-canvas {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.refgraph-canvas.is-panning {
+  cursor: grabbing;
+}
+
+.refgraph-node {
+  cursor: pointer;
+  outline: none;
+  transition: opacity 160ms ease;
+}
+
+/* Each box pops in when it first appears, deeper rows a beat later. */
+.refgraph-pop {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: refgraph-pop 420ms cubic-bezier(0.2, 0.9, 0.3, 1.25) both;
+}
+
+@keyframes refgraph-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.refgraph-edge-in {
+  animation: refgraph-fade 500ms ease-out both;
+}
+
+@keyframes refgraph-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.refgraph-edge {
+  transition: opacity 160ms ease, stroke 160ms ease;
+}
+
+/* Arrows touching the box in focus run like a current, from the provision
+   that cites to the one it cites. */
+.refgraph-flow {
+  stroke-dasharray: 6 5;
+  animation: refgraph-flow 0.8s linear infinite;
+}
+
+@keyframes refgraph-flow {
+  to {
+    stroke-dashoffset: -11;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .refgraph-pop,
+  .refgraph-edge-in,
+  .refgraph-flow {
+    animation: none;
+  }
+}
+
+/* Invisible grip where the analysis/citations gap meets the column edge (CornerResizer.tsx). */
+.corner-resizer {
+  position: absolute;
+  z-index: 40;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.corner-resizer:focus {
+  outline: none;
+}
+
+.corner-resizer:focus-visible {
+  outline: 2px solid var(--accent-color);
+}
+
+/* While the grip is held, keep its cursor everywhere and stop text selection,
+   so a fast drag across a pane neither flickers nor highlights text. */
+body.is-resizing-diagonal,
+body.is-resizing-diagonal * {
+  cursor: nwse-resize !important;
+  user-select: none !important;
+}
+
+/* Fold animation. useFold adds this class only during a fold, so dragging stays immediate. */
+.panels-folding > [data-panel] {
+  transition: flex-grow 300ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.panels-folding > [data-separator] {
+  transition: width 300ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Indexing progress round a document card (BorderProgress.tsx). The stroke sits on the
+   card's 1px border, so the SVG must not clip. */
+.border-progress {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.border-progress-line {
+  fill: none;
+  stroke: var(--accent-color);
+  stroke-width: 2;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+}
+
+.border-progress--running .border-progress-line {
+  stroke-dashoffset: 8;
+  transition: stroke-dashoffset var(--trickle-ms) cubic-bezier(0.08, 0.6, 0.2, 1);
+}
+
+/* Done: close the loop quickly, then fade into the card's own border. */
+.border-progress--done .border-progress-line {
+  stroke-dashoffset: 0;
+  opacity: 0;
+  transition: stroke-dashoffset 0.35s ease-out, opacity 0.25s ease-out 0.35s;
+}
+
+.border-progress--idle .border-progress-line {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .border-progress--running .border-progress-line {
+    stroke-dashoffset: 0;
+    opacity: 0.5;
+    transition: none;
+  }
+
+  .border-progress--done .border-progress-line {
     transition: none;
   }
 }
