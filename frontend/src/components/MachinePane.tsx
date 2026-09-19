@@ -1,8 +1,9 @@
-import { tidyCpu, type MachineStats } from '../lib/useMachineStats';
+import type { MachineStats } from '../lib/useMachineStats';
 
 const GREEN = '#22c55e';
 const BLUE = '#3b82f6';
 const AMBER = '#f59e0b';
+const RED = '#ef4444';
 
 function Meter({ pct, color }: { pct: number; color: string }) {
   return (
@@ -18,29 +19,42 @@ function Meter({ pct, color }: { pct: number; color: string }) {
   );
 }
 
-// One line per device: label, a half-width meter, and the numbers inline —
-// keeps the machine section compact enough to sit above the document list.
-function LoadRow({
-  label,
-  pct,
-  color,
-  stats,
-}: {
+/* Green when cool, amber when warm, red when hot. */
+function heatColor(celsius: number): string {
+  if (celsius >= 80) return RED;
+  if (celsius >= 65) return AMBER;
+  return GREEN;
+}
+
+/* One device as grid cells: label, meter, load and temperature, with its memory underneath. */
+function DeviceRow({ label, pct, color, tempC, memory }: {
   label: string;
   pct: number;
   color: string;
-  stats: string;
+  tempC?: number | null;
+  memory: string;
 }) {
+  let tempText = '';
+  let tempColor = 'var(--text-muted)';
+  if (tempC !== null && tempC !== undefined) {
+    tempText = `${Math.round(tempC)}°C`;
+    tempColor = heatColor(tempC);
+  }
+
   return (
-    <div className="flex items-center gap-3 text-sm">
-      <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>{label}</span>
-      <div className="w-1/2 shrink-0">
-        <Meter pct={pct} color={color} />
-      </div>
-      <span className="ml-auto text-xs tabular-nums" style={{ color: 'var(--text-muted)' }}>
-        {stats}
+    <>
+      <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <Meter pct={pct} color={color} />
+      <span className="text-right text-sm font-semibold tabular-nums" style={{ color }}>
+        {Math.round(pct)}%
       </span>
-    </div>
+      <span className="text-right text-xs font-semibold tabular-nums" style={{ color: tempColor }}>
+        {tempText}
+      </span>
+      <span className="col-span-3 col-start-2 mb-1.5 text-[11px] tabular-nums" style={{ color: 'var(--text-muted)' }}>
+        {memory}
+      </span>
+    </>
   );
 }
 
@@ -51,7 +65,7 @@ export function MachinePane({
 }) {
   if (!machine) return null;
 
-  const { specs, gpu, cpu, model } = machine;
+  const { gpu, cpu, model } = machine;
 
   return (
     <div>
@@ -62,34 +76,23 @@ export function MachinePane({
         Machine
       </h3>
 
-      {/* Static identity — what this pipeline is actually running on. */}
-      <div className="text-xs leading-relaxed mb-4" style={{ color: 'var(--text-muted)' }}>
-        <p style={{ color: 'var(--text-main)' }}>
-          {tidyCpu(specs.cpu)} · {specs.cores} cores
-        </p>
-        <p style={{ color: 'var(--text-main)' }}>
-          {specs.gpu
-            ? `${specs.gpu} · ${((specs.vram_total_mb ?? 0) / 1024).toFixed(1)} GB VRAM`
-            : 'No CUDA GPU — running on CPU'}
-        </p>
-        <p>{specs.ram_total_gb} GB RAM · {specs.os}</p>
-      </div>
-
-      {/* Live load */}
-      <div className="mb-4 space-y-2">
+      {/* One grid for both devices, so their meters, loads and temperatures line up. */}
+      <div className="mb-3 grid grid-cols-[auto_1fr_auto_auto] items-center gap-x-3 gap-y-0.5">
         {gpu && (
-          <LoadRow
+          <DeviceRow
             label="GPU"
             pct={gpu.util}
             color={GREEN}
-            stats={`${gpu.util}% · ${(gpu.vram_used_mb / 1024).toFixed(1)} / ${(gpu.vram_total_mb / 1024).toFixed(1)} GB · ${gpu.temp_c}°C`}
+            tempC={gpu.temp_c}
+            memory={`${(gpu.vram_used_mb / 1024).toFixed(1)} / ${(gpu.vram_total_mb / 1024).toFixed(1)} GB VRAM`}
           />
         )}
-        <LoadRow
+        <DeviceRow
           label="CPU"
           pct={cpu.util}
           color={BLUE}
-          stats={`${cpu.util.toFixed(0)}% · ${cpu.ram_used_gb} / ${cpu.ram_total_gb} GB RAM`}
+          tempC={cpu.temp_c}
+          memory={`${cpu.ram_used_gb} / ${cpu.ram_total_gb} GB RAM`}
         />
       </div>
 
