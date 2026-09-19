@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { locationLabel, stripPua, type RetrievalItem } from '../lib/utils';
 
 type CitationPaneProps = {
@@ -5,7 +6,7 @@ type CitationPaneProps = {
   retrieval: RetrievalItem[];
 };
 
-export function CitationPane({ citations, retrieval }: CitationPaneProps) {
+function CitationPaneView({ citations, retrieval }: CitationPaneProps) {
   return (
     <div
       className="flex h-full flex-col overflow-hidden p-5"
@@ -19,18 +20,21 @@ export function CitationPane({ citations, retrieval }: CitationPaneProps) {
       </h3>
 
       <div className="flex-1 overflow-auto min-h-0">
-        {citations.length === 0 ? (
+        {citations.length === 0 && (
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
             Ask a question to see the passages used.
           </p>
-        ) : (
+        )}
+
+        {citations.length > 0 && (
           <div className="space-y-2">
             {citations.map((passage, idx) => {
               // Index-parallel with citations; absent for documents indexed
               // before structural metadata existed.
               const item = retrieval[idx];
               const where = locationLabel(item);
-              const pct = item ? Math.round(item.score * 100) : null;
+              let pct: number | null = null;
+              if (item) pct = Math.round(item.score * 100);
 
               return (
                 <div
@@ -96,3 +100,6 @@ export function CitationPane({ citations, retrieval }: CitationPaneProps) {
     </div>
   );
 }
+
+// Re-renders only when its citations change, not on every machine-stats poll.
+export const CitationPane = memo(CitationPaneView);
