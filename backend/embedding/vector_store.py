@@ -1,11 +1,10 @@
 import chromadb
-
 from .embedder import embed_batch, embed_text
 
 client = chromadb.PersistentClient(path='./chroma_db')
 
 collection = client.get_or_create_collection(
-    'fraud_rag',
+    'xref-rag',
     metadata={"hnsw:space": "cosine"},
 )
 
@@ -37,12 +36,18 @@ def store_chunks(texts: list[str], embeddings: list, metadatas: list[dict],
     ids = [f"{doc_name}_chunk_{i}" for i in range(len(texts))]
 
     collection.delete(where={"source": doc_name})
-    collection.upsert(
-        documents=texts,
-        embeddings=embeddings,
-        ids=ids,
-        metadatas=metadatas,
-    )
+    batch = client.get_max_batch_size()
+
+    for start in range(0, len(texts), batch):
+
+        end = start + batch
+
+        collection.upsert(
+            documents=texts[start:end],
+            embeddings=embeddings[start:end],
+            ids=ids[start:end],
+            metadatas=metadatas[start:end],
+        )
 
 def embed_and_store_chunks(chunks: list[str] | list[dict], doc_name: str) -> None:
     texts, metadatas = _prepare_chunks(chunks, doc_name)
@@ -90,6 +95,22 @@ def get_all_chunks(source: str | None = None):
 
     return data["ids"], data["documents"]
 
+def get_document_chunks(doc_name: str) -> tuple[list[str], list[dict]]:
+    data = collection.get(where={"source": doc_name},
+    include=["documents", "metadatas"])
+
+    return data["documents"], data["metadatas"]
+
+def list_documents() -> dict[str, int]:
+    data = collection.get(include=["metadatas"])
+    counts = {}
+    for meta in data['metadatas']:
+        name = meta.get("source")
+        if name is None:
+            continue
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
 
 def _values_for(metas: list[dict], key: str) -> list:
     values = []
@@ -120,6 +141,8 @@ def get_document_stats(doc_name: str) -> dict:
         keys.update(meta)
     keys.discard("source")
     keys.discard("page")
+    keys.discard("paragraph")
+    keys.discard("point")
 
     for key in sorted(keys):
         values = _values_for(metas, key)

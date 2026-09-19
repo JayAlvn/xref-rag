@@ -1,12 +1,13 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from embedding.vector_store import delete_document, get_document_stats
+from embedding.vector_store import delete_document, get_document_stats, list_documents
 from pipeline.pipeline import ingest, answer_query
+from graph.store import delete_edges
 from telemetry import snapshot
 import os, shutil
 
-app = FastAPI(title='IPS-RAG API')
+app = FastAPI(title='X-REF-RAG API')
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,7 +58,15 @@ def query_endpoint(request: QueryRequest):
     return answer_query(request.query, request.mode, request.source, request.n)
 
 
+@app.get("/documents")
+def documents_endpoint():
+    documents = []
+    for name, chunks in list_documents().items():
+        documents.append({"name": name, "chunks": chunks})
+    return documents
+
 @app.delete("/document/{doc_name}")
 def delete_endpoint(doc_name: str):
     delete_document(doc_name)
+    delete_edges(doc_name)
     return {"deleted": doc_name}

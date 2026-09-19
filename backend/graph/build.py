@@ -1,19 +1,19 @@
 
+from graph.store import save_edges
 from ingestion.references import extract_references
-from ingestion.structure import _CONTAINERS
 
-# turns one chunk's metadata into its node id. 
+from embedding.vector_store import get_document_chunks
+
+# The units a graph node can be, most specific first. Paragraphs and points
+# stay out: cross-references are drawn between provisions, not their points.
+_NODE_KINDS = ("recital", "article", "clause", "rule", "section",
+               "annex", "schedule", "appendix", "exhibit", "chapter", "part", "title")
+
+
 def _node_of(meta: dict) ->  str | None:
-    container = None
-    for key in meta:
-        if key == "source" or key == "page":
-            continue
-        if key not in _CONTAINERS:
-            return f"{key}:{meta[key]}"
-        container = key
-    if container is not None:
-        return f"{container}:{meta[container]}"
-    
+    for kind in _NODE_KINDS:
+        if kind in meta:
+            return f"{kind}:{meta[kind]}"
     return None
 
 
@@ -47,6 +47,14 @@ def build_edges(texts: list[str], metas: list[dict]) -> list[tuple]:
             edges.add((source, target, edge_type))
 
     return sorted(edges)
+
+def build_graph(doc_name: str) -> int:
+    texts, metas = get_document_chunks(doc_name)
+    edges = build_edges(texts, metas)
+    save_edges(doc_name, edges)
+    
+    return len(edges)
+
 
 
 if __name__ == "__main__":

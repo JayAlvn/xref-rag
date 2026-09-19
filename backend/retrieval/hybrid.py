@@ -75,7 +75,7 @@ def parse_identifier(query_text: str) -> list[tuple[str, int]]:
         for fallback in _FALLBACKS.get(word, ()):
             found.append((fallback, number))
     if page is not None:
-        found.append(("page", number))
+        found.append(("page", page))
 
     return found
 

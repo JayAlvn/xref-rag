@@ -5,9 +5,4 @@ __pycache__/
 backend/chroma_db/
 backend/uploads/
 .env
-README
-
-
-# Large binaries -- link the demo video from the README rather than vendoring it
-RAGDEMO.mp4
-F-RAG_Build_Report.pdf
+edges.db

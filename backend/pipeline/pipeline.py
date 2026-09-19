@@ -4,6 +4,8 @@ import time
 from ingestion import load_document_pages, chunk_document
 from embedding.vector_store import embed_and_store_chunks
 
+from graph.build import build_graph
+from graph.neighbourhood import graph_for
 from retrieval.hybrid import route_search
 
 from generation.naive_backend import NaiveBackend
@@ -27,6 +29,7 @@ def ingest(doc_path: str) -> int:
     doc_name = os.path.basename(doc_path)
 
     embed_and_store_chunks(chunks, doc_name)
+    build_graph(doc_name)
 
     return len(chunks)
 
@@ -114,6 +117,8 @@ def answer_query(user_query: str, mode: str = "basic", source: str | None = None
         {"source": f"Source {i + 1}", "score": s, **_location(m)}
         for i, (s, m) in enumerate(zip(relevance_score, metas))
     ]
+    
+    result["graph"] = graph_for(metas)
 
     confidence = _calculate_confidence_score(relevance_score, result.get("finding",""))
     result["confidence"] = confidence

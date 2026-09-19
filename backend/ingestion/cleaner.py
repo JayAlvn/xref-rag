@@ -1,6 +1,7 @@
 import re
 import unicodedata
 import wordninja
+from collections import Counter
 
 _JUNK_BLOCKS = re.compile(
     r'[─-╿'          # Box Drawing
@@ -20,6 +21,38 @@ _SMART_QUOTES = str.maketrans({
     '“': '"', '”': '"', '•': '-', '…': '...',
 })
 
+EDGE_LINES = 4
+
+def line_signature(line: str) -> str:
+    line = line.strip()
+    if re.search(r"[A-Za-z]", line):
+        return re.sub(r"\d+", "#", line)
+    return line
+
+def running_lines(pages: list[str]) -> set[str]:
+    counts = Counter()
+    for text in pages:
+        lines = []
+        for line in text.splitlines():
+            if line.strip():
+                lines.append(line.strip())
+        
+        edges = set()
+
+        for line in lines[:EDGE_LINES] + lines[-EDGE_LINES:]:
+            edges.add(line_signature(line))
+        counts.update(edges)
+
+    threshold = max(3, len(pages) // 2)
+
+    furniture = set()
+
+    for signature, n in counts.items():
+        if n >= threshold:
+            furniture.add(signature)
+    
+
+    return furniture
 
 def _looks_glued(text: str) -> bool:
     """True when text lost its spaces (< 8% of chars are spaces)."""

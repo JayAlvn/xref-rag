@@ -1,8 +1,9 @@
 from bisect import bisect_right
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from ingestion.cleaner import clean_text
-from ingestion.structure import find_markers, _CONTAINERS
+from ingestion.cleaner import clean_text, running_lines, line_signature
+from ingestion.structure import find_markers, _DEPTH
+
 
 CHUNK_SIZE = 500   # max no of chars per chunk
 CHUNK_OVERLAP = 50  # repeating the last 50 tokens of each chunk at the start of the next one
@@ -15,20 +16,29 @@ _splitter = RecursiveCharacterTextSplitter(
     separators=['\n\n', '\n', '.', ' ']
 )
 
-
 def chunk_text(text: str) -> list[str]:
     return _splitter.split_text(text)
 
 
 def _stitch(pages: list[tuple[int, str]]) -> tuple[str, list[int], list[int]]:
-    texts, starts, numbers = [], [], []
+    
+    cleaned = [clean_text(raw) for _, raw in pages]
+    furniture = running_lines(cleaned)
+
+    texts, starts, numbers = [],[],[]
     offset = 0
-    for number, raw in pages:
-        cleaned = clean_text(raw)
-        texts.append(cleaned)
+    for (number, _), text in zip(pages, cleaned):
+
+        kept_lines = []
+        for line in text.splitlines():
+            if line_signature(line) not in furniture:
+                kept_lines.append(line)
+
+        kept = "\n".join(kept_lines)
+        texts.append(kept)
         starts.append(offset)
         numbers.append(number)
-        offset += len(cleaned) + 1  # +1 for the joining newline
+        offset += len(kept) + 1  # +1 for the joining newline
     return "\n".join(texts), starts, numbers
 
 
@@ -60,21 +70,25 @@ def chunk_document(pages: list[tuple[int, str]]) -> list[dict]:
         return _emit(text, 0, page_of, {})
 
     chunks = []
-    container = None
-    # Text ahead of the first marker (cover, table of contents) is still content.
     if text[:markers[0][0]].strip():
         chunks += _emit(text[:markers[0][0]], 0, page_of, {})
+    path = {}
 
     for i, (start, kind, value) in enumerate(markers):
-        end = markers[i + 1][0] if i + 1 < len(markers) else len(text)
+        #find marker's text ends: where the next marker begins, 
+        #or at the end of the document if this is the last marker.
 
-        labels = {kind: value}
+        end = len(text)
+        if i + 1 < len(markers):
+            end = markers[i + 1][0]
 
-        if kind in _CONTAINERS:
-            container = (kind, value)
-        elif container:
-            labels[container[0]] = container[1]
+        depth = _DEPTH.get(kind, 5)
 
+        for deeper in [d for d in path if d >= depth]:
+            del path[deeper]
+        path[depth] = (kind, value)
+
+        labels = {k: v for k, v in path.values()}
         chunks += _emit(text[start:end], start, page_of, labels)
 
     return chunks
