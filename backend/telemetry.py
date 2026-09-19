@@ -46,6 +46,27 @@ def _gpu() -> dict | None:
         "temp_c": pynvml.nvmlDeviceGetTemperature(_HANDLE, pynvml.NVML_TEMPERATURE_GPU),
     }
 
+def _cpu_temp() -> float | None:
+    try:
+        temps = psutil.sensors_temperatures()
+        if not temps:
+            return None
+
+        for name in ("coretemp", "k10temp", "zenpower", "cpu_termal", "acpitz"):
+           if name in temps and temps[name]:
+            for entry in temps[name]:
+                if entry.label and ("package" in entry.label.lower() or "tctl" in entry.label.lower()):
+                    return entry.current
+                return temps[name][0].current
+
+        for entries in temps.values():
+            if entries:
+                return entries[0].current
+    except Exception:
+        pass 
+    return None
+            
+
 
 def _cpu() -> dict:
     """Live CPU load.
@@ -56,6 +77,7 @@ def _cpu() -> dict:
     vm = psutil.virtual_memory()
     return {
         "util": psutil.cpu_percent(interval=None),
+        "temp_c": _cpu_temp(),
         "ram_used_gb": round((vm.total - vm.available) / 1024 ** 3, 1),
         "ram_total_gb": round(vm.total / 1024 ** 3, 1),
     }
