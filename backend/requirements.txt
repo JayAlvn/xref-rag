@@ -2,7 +2,6 @@ fastapi
 uvicorn
 pydantic
 chromadb
-sentence-transformers
 langchain-text-splitters
 pypdf
 pymupdf
