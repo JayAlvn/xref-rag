@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Group, Panel, Separator, type GroupImperativeHandle, type Layout } from 'react-resizable-panels';
 import { THEMES, ThemeColors } from './lib/themes';
 import type { RetrievalItem, Message, Turn, Lookup, Usage, Doc, RefGraphData } from './lib/utils';
-import { EMPTY_GRAPH, fetchDocStats, fetchDocuments, lookupLabel } from './lib/utils';
+import { EMPTY_GRAPH, api, fetchDocStats, fetchDocuments, lookupLabel } from './lib/utils';
 import { useMachineStats } from './lib/useMachineStats';
 import { MessageSquareIcon, PanelRightIcon } from './components/Icons';
 import { CitationPane } from './components/CitationPane';
@@ -308,8 +308,8 @@ function App() {
     const started = performance.now();
     let shown = prompt;
     if (label) shown = label;
-    let endpoint = 'http://localhost:8000/query';
-    if (lookupOnly) endpoint = 'http://localhost:8000/retrieve';
+    let endpoint = api('/query');
+    if (lookupOnly) endpoint = api('/retrieve');
 
     setMessages(prev => [...prev, { id: ++nextId.current, role: 'user', content: shown }]);
     setLoading(true);

@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -8,10 +10,19 @@ from pipeline.pipeline import ingest, answer_query, retrieve
 from graph.store import delete_edges
 from graph.neighbourhood import neighbours_of
 from telemetry import snapshot
+from generation import runtime
 from settings import UPLOADS_DIR
 import os, shutil
 
-app = FastAPI(title='X-REF-RAG API')
+# Find (or start) the Ollama that answers questions when the server starts, and
+# stop the one this backend started when it shuts down.
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    runtime.start()
+    yield
+    runtime.stop()
+
+app = FastAPI(title='X-REF-RAG API', lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,6 +36,17 @@ def health():
     return{
         "status": "ok"
     }
+
+@app.get("/setup")
+def setup_status():
+    """Whether the language model is ready, or what setting it up involves."""
+    return runtime.status()
+
+@app.post("/setup")
+def setup_begin():
+    """Download and start Ollama and the model, in the background."""
+    runtime.begin_setup()
+    return runtime.status()
 
 @app.get("/stats")
 def stats():

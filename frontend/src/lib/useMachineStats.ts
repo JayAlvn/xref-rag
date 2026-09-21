@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { api } from './utils';
 
 export type MachineSpecs = {
   cpu: string;
@@ -50,7 +51,7 @@ export function useMachineStats(busy: boolean): MachineStats | null {
 
     const tick = async () => {
       try {
-        const res = await fetch('http://localhost:8000/stats');
+        const res = await fetch(api('/stats'));
         if (!res.ok) return;
         const data = await res.json();
         // Without this guard a response landing after unmount sets state on a

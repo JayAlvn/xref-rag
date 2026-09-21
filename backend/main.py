@@ -7,6 +7,7 @@ import psutil
 import uvicorn
 
 from api import app
+from generation import runtime
 
 
 # The desktop app passes its own process id. Once that process is gone --
@@ -27,6 +28,8 @@ def exit_with(parent: int) -> None:
         except psutil.NoSuchProcess:
             break
 
+    # os._exit skips the server's own shutdown, so stop Ollama here.
+    runtime.stop()
     os._exit(0)
 
 
