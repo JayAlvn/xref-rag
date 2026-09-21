@@ -35,6 +35,41 @@ export async function backendIsUp(): Promise<boolean> {
   }
 }
 
+/** GET /setup: whether the language model is ready, or what setting it up involves. */
+export type SetupStatus = {
+  state: 'ready' | 'starting' | 'missing' | 'working' | 'error';
+  source: 'custom' | 'system' | 'bundled' | null;
+  needs: ('runtime' | 'model')[];
+  step: '' | 'download' | 'unpack' | 'start' | 'model';
+  done: number;
+  total: number;
+  error: string;
+  download_bytes: number;
+  model: string;
+  ollama_version: string;
+  automatic: boolean;
+};
+
+/** Null while the backend cannot be reached. */
+export async function fetchSetup(): Promise<SetupStatus | null> {
+  try {
+    const res = await fetch(api('/setup'));
+    if (!res.ok) return null;
+    return await res.json() as SetupStatus;
+  } catch {
+    return null;
+  }
+}
+
+/** Starts the download in the backend; progress is read back with fetchSetup. */
+export async function beginSetup(): Promise<void> {
+  try {
+    await fetch(api('/setup'), { method: 'POST' });
+  } catch {
+    // The next fetchSetup reports whether it started.
+  }
+}
+
 /** One retrieved passage. Location fields are absent for documents indexed without structure. */
 export type RetrievalItem = {
   source: string;
