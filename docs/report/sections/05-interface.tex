@@ -1,0 +1,98 @@
+\section{Interface}
+\label{sec:interface}
+
+\subsection{HTTP API}
+
+The backend is served by FastAPI (\cref{tab:api}). Answering and retrieval
+take the same request, a query and an optional document to scope it to. The
+number of passages is deliberately not a parameter: it is decided by the
+retrieval (\cref{sec:retrieval}).
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}llX@{}}
+\toprule
+Method & Path & Purpose \\
+\midrule
+GET    & \texttt{/health}                     & Liveness check. \\
+GET    & \texttt{/stats}                      & CPU, GPU and memory load and
+                                                temperatures. \\
+GET    & \texttt{/documents}                  & Indexed documents and their
+                                                chunk counts. \\
+POST   & \texttt{/upload}                     & Store and ingest a file. \\
+DELETE & \texttt{/document/\{name\}}          & Remove a document's chunks and
+                                                cross-reference edges. \\
+GET    & \texttt{/document/\{name\}/stats}    & Pages and structural units
+                                                found. \\
+POST   & \texttt{/query}                      & Retrieval-augmented answer. \\
+POST   & \texttt{/retrieve}                   & Passages only, without
+                                                generation. \\
+GET    & \texttt{/document/\{name\}/provision}  & Full text of one provision,
+                                                in reading order. \\
+GET    & \texttt{/document/\{name\}/neighbours} & What a provision cites and
+                                                what cites it. \\
+\bottomrule
+\end{tabularx}
+\caption{API endpoints.}
+\label{tab:api}
+\end{table}
+
+\subsection{Desktop application}
+
+The interface is a React~19 application written in TypeScript and built with
+Vite, running inside a Tauri~2 desktop shell. It is divided into three
+resizable panes that can each be folded away (\cref{fig:interface}).
+
+\begin{figure}[ht]
+\centering
+\IfFileExists{images/interface.png}{%
+  \includegraphics[width=\textwidth]{images/interface.png}%
+}{%
+  \fbox{\parbox{0.9\textwidth}{\centering\small
+  Screenshot of the application: save it as \texttt{images/interface.png}.}}%
+}
+\caption{The desktop application: retrieved citations (left), chat (centre)
+and context (right).}
+\label{fig:interface}
+\end{figure}
+
+\paragraph{Retrieved citations.} Each passage is shown as a card headed by its
+source number, its printed page and its reference written the way it would be
+cited---for example ``p.~118 $\cdot$ Article 101(1), second subparagraph''. A
+line above the cards states how the passages were found: an exact match on the
+provision named, or the closest passages by keyword and meaning. Below each
+card, the provisions the passage cites can be followed (\cref{sec:graph}).
+
+\paragraph{Chat.} The transcript shows the question, the answer, and the
+detail beneath it in smaller type. Every answered turn keeps its own passages,
+so clicking an earlier answer restores its citations without querying again. A
+running query can be stopped. The composer shows which document questions are
+scoped to and accepts a small set of commands, suggested as the first word is
+typed: \texttt{find:} retrieves passages without generating an answer,
+\texttt{doc:} changes the scope, \texttt{clear} empties the conversation and
+\texttt{help} lists the commands. Shorthand for structural words is expanded
+with the Tab key: \texttt{a}, \texttt{para}, \texttt{p}, \texttt{sec} and
+\texttt{cha} become \emph{article}, \emph{paragraph}, \emph{point},
+\emph{section} and \emph{chapter}. Only Tab expands, so the word ``a'' in an
+ordinary sentence is left alone.
+
+\paragraph{Context.} The last query's token usage is shown against the
+4\,096-token window, split into prompt and response, together with the
+session total and the time taken. Machine telemetry shows GPU and CPU load,
+temperature and memory, and how much of the model is resident in video
+memory. The document list shows each indexed document with a structural
+summary (``144 pages $\cdot$ 13 chapters $\cdot$ 113 articles $\cdot$ 180
+recitals''), accepts uploads of PDF, DOCX and TXT files with an estimate of
+the indexing time, and scopes questions to a document when it is clicked.
+
+\paragraph{Trade-offs.} Tauri was chosen over Electron because it uses the
+operating system's web view instead of bundling a browser, which keeps the
+application small and its memory footprint low beside a language model
+competing for the same machine. The cost is that three web engines render the
+interface---WebKit on macOS and Linux, WebView2 on Windows---and small
+differences between them must be accommodated. Native translucency is used
+only where the platform composites it itself (vibrancy on macOS, Mica and
+Acrylic on Windows); elsewhere the window stays opaque, because a blur
+redrawn by the web view on every change of the panes made the interface
+sluggish.

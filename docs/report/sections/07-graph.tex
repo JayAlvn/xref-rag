@@ -1,0 +1,158 @@
+\section{Cross-reference graph}
+\label{sec:graph}
+
+With passages labelled down to their subdivisions, the references between them
+can be resolved. The graph is built once per upload, stored beside the vectors,
+and read at answer time. This section follows it through its five stages:
+extracting references, turning them into edges, storing them, expanding the
+neighbourhood of an answer, and presenting it to the reader.
+
+\subsection{Extracting references}
+
+A reference is a unit word followed by an identifier and, optionally, a
+paragraph in parentheses, as in ``Article 5(2)''. The extractor uses the same
+unit vocabulary as the structure parser, so anything that can be cited can
+also be a heading, and the reverse. A match that stands alone on its line is a
+heading, not a reference, and is skipped.
+
+Each reference is then classified as internal or external. It points at
+another instrument when it is followed by ``of'' and a capitalised name that
+is not itself a unit (``Article 11 of Regulation (EU) 2019/2144''), or by an
+acronym of three or more capitals (``Article 114 TFEU''). ``Article 5 of this
+Regulation'' stays internal, because ``this'' is not a name. References are
+deduplicated per passage by unit, identifier and instrument.
+\Cref{lst:references} shows the result on a sample passage.
+
+\begin{lstlisting}[float, numbers=none, caption={References extracted from a sample
+passage.}, label={lst:references}]
+1. As referred to in Article 5(2) and Annex III, the requirements of
+Chapter III, Section 2 apply. Article 11 of Regulation (EU) 2019/2144
+applies, as does Article 114 TFEU. See also Article 5 of this Regulation.
+
+article 5, paragraph 2    internal
+annex III                 internal
+chapter III               internal
+section 2                 internal
+article 11                external: Regulation (EU) 2019/2144
+article 114               external: TFEU
+\end{lstlisting}
+
+\subsection{Building edges}
+
+A node is a provision: the most specific provision-level label a passage
+carries---recital, article, clause, rule, section, annex, schedule, appendix,
+exhibit, chapter, part or title---written as \texttt{kind:value}, for example
+\texttt{article:66}. The builder reads the document's passages back from the
+vector store in reading order and, for each reference in each passage, adds an
+edge from the passage's provision to the provision cited. An edge is
+\emph{internal} when some passage of the document carries the cited label,
+\emph{external} when it names another instrument, and \emph{unresolved} when
+the document has no passage with that label. A provision's references to
+itself are skipped. Every edge also records its \emph{position}, the index of
+the citing passage, which orders a provision's references as they appear in
+the text, and its \emph{locator}, the paragraph, subparagraph, point and
+sub-point of the citing passage (``paragraph 1 $\cdot$ point b'').
+
+Reading the passages back from the store, rather than from the parser's
+output, guarantees that edges use exactly the labels retrieval uses: a node
+identifier converts directly into the metadata filter that fetches its text.
+
+\paragraph{Trade-offs.} Nodes are provisions, not paragraphs. References to
+``Article 5(2)'' and ``Article 5(3)'' therefore reach the same node, and the
+precision on the cited side is traded for a graph that stays small and whose
+every node can be fetched with one filter. Precision on the citing side is
+kept in the locator. For the AI Act the graph holds 575 internal edges, 79
+edges to other instruments and 29 unresolved ones, the latter mostly
+references to units the parser does not label as provisions, such as the
+sections inside an annex.
+
+\subsection{Storage}
+
+Edges are stored in SQLite (\cref{lst:schema}). A document's edges are
+replaced whenever it is uploaded and removed when it is deleted. Two queries
+serve every use: the edges leaving a set of nodes, ordered by position, and
+the edges arriving at a set of nodes, which the index on the target makes
+cheap.
+
+\begin{lstlisting}[float, language=SQL, caption={The edge table
+(\texttt{graph/store.py}).}, label={lst:schema}]
+CREATE TABLE IF NOT EXISTS edges (
+    position    INTEGER NOT NULL,
+    locator     TEXT NOT NULL,
+    document    TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    target      TEXT NOT NULL,
+    edge_type   TEXT NOT NULL,
+    PRIMARY KEY (document, source, target, position)
+);
+CREATE INDEX IF NOT EXISTS edges_by_target ON edges (document, target);
+\end{lstlisting}
+
+\paragraph{Trade-offs.} A graph database would add a server to install and
+run, for queries that are all one hop long. SQLite ships with Python, keeps
+the edges in a single file beside the vector store, and answers both queries
+from an index. Traversals longer than one hop are done in Python with a
+bounded depth, which is all the interface needs.
+
+\subsection{Neighbourhood of an answer}
+
+Every answer carries the cross-reference neighbourhood of its passages. The
+provisions of the retrieved passages are the seeds, at depth 0. The
+neighbourhood is then expanded breadth-first along internal edges to depth 2,
+with at most 50 nodes. Each node carries its label, its kind (retrieved,
+internal, external or unresolved), its depth and, for provisions in the
+document, a preview of its first 240 characters. Each edge carries its type,
+its locator and an index that numbers a provision's references in reading
+order. Because the first level arrives with the answer, the references of a
+retrieved passage can be listed without another request.
+
+Two endpoints serve deeper exploration on demand: one returns what a
+provision cites and what cites it, each in reading order, and the other
+returns a provision's full text (\cref{tab:api}).
+
+\subsection{Presenting cross-references}
+
+\paragraph{A graph view, and why it was dropped.} The first presentation was
+an interactive graph drawn beside the answer, first with a force-directed
+layout and then with a radial one that placed the retrieved provisions at the
+centre, arranged each further level on a wider ring, swapped nodes to shorten
+and uncross the arrows, and routed curved arrows around the boxes. It took
+about 1\,500 lines of TypeScript. With the typical neighbourhood of 20 to 50
+nodes it showed \emph{that} provisions referred to each other, but not
+\emph{what} they said: reading a chain meant opening node after node while
+holding the path in memory, and the layout's motion competed with the text.
+The graph view was therefore dropped in favour of a much simpler interface,
+and the graph itself remained in the backend as the data behind it.
+
+\paragraph{The reference tree.} Under each citation card, the provisions the
+passage cites are listed in the order the text cites them, each with the
+locator of the citing passage (\cref{lst:tree}). Opening a row fetches the
+cited provision's text and its own references once and shows them indented
+beneath it, so a chain of citations stays on screen and reads from top to
+bottom. A reference to another instrument is marked \emph{other document}, an
+unresolved one \emph{not found}, and a provision that already appears higher
+on the same path \emph{already above}; none of these can be opened, which also
+makes every chain finite even when provisions cite each other. A long list
+shows twelve rows and offers the rest on request. Nothing animates, and every
+row exposes its open or closed state to assistive technology.
+
+\begin{lstlisting}[float, numbers=none, caption={The reference tree under Article
+101(1), with two levels opened (\texttt{v} open, \texttt{>} closed).},
+label={lst:tree}]
+Cites
+v 1. Article 91 . paragraph 1 . point b
+     Article 91 Power to request documentation and information
+     1. The Commission may request the provider of the general-purpose
+        AI model concerned to provide the documentation ...
+     v 1. Article 68 . paragraph 3
+          Article 68 Scientific panel of independent experts
+          1. The Commission shall, by means of an implementing act, ...
+> 2. Article 93 . paragraph 1 . point c
+\end{lstlisting}
+
+\paragraph{Trade-offs.} The tree gives up the overview of the whole
+neighbourhood that a graph offers at a glance, and with it the ability to see
+clusters and hubs. In exchange, the text of every cited provision is readable
+in place and in order, which is what following a cross-reference is for. The
+component is about 140 lines, a tenth of the graph view, and costs two small
+requests per opened row instead of a layout computation on every change.

@@ -1,0 +1,115 @@
+\section{Status and limitations}
+\label{sec:status}
+
+\subsection{Testing and continuous integration}
+
+The unit tests run without a language model. The ingestion tests check the
+PDF, Word and text readers and the chunk sizes. The generation tests replace
+Ollama with a stub that records the prompt, and check that the answer and
+detail are taken from the model's JSON reply, that a reply which is not JSON
+is kept as the answer, that token usage is reported, that the focus line
+appears exactly when a named provision was found, and that interleaving keeps
+the strongest passage first. A pipeline test ingests a PDF fixture and checks
+that retrieval returns passages with their locations; it needs the embedding
+model and the vector store and is run locally.
+
+Continuous integration runs on GitHub Actions for every pull request and every
+push to the main branch. One job installs the interface's dependencies,
+type-checks it and builds it; the other installs the backend on Python 3.12
+with a CPU-only build of PyTorch and runs the eleven model-free tests.
+
+\subsection{Measured behaviour}
+
+\Cref{tab:corpora} lists what ingestion recovers from the two main development
+documents, and \cref{tab:measured} how representative questions are served.
+Times were measured on the development machine described in
+\cref{sec:overview}.
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}lrrX@{}}
+\toprule
+Document & Pages & Chunks & Structure found \\
+\midrule
+AI Act~\cite{euaiact} & 144 & 2\,019 & 13 chapters, 5 sections, 113 articles,
+                                       180 recitals, 13 annexes; printed pages
+                                       equal PDF pages \\
+TCPS~2 (2022)~\cite{tcps2} & 287 & 1\,664 & 13 chapters, 142 articles; printed
+                                       page = PDF page $-$ 8 \\
+\bottomrule
+\end{tabularx}
+\caption{Structure recovered at ingestion.}
+\label{tab:corpora}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}Xlrr@{}}
+\toprule
+Question & Path & Passages & Retrieval \\
+\midrule
+``paragraph 2 article 7'' (AI Act) & exact, subdivision & 14 & 3.1\,ms \\
+``chapter 3 page 48'' (TCPS~2) & exact, chapter and page & 7 & 5.5\,ms \\
+``paragraph 2 article 85'' (AI Act) & exact, part missing & 2 & -- \\
+``who can lodge a complaint with a market surveillance authority'' (AI Act)
+  & hybrid & 5 & 235\,ms \\
+\bottomrule
+\end{tabularx}
+\caption{Retrieval for representative questions. For the missing paragraph
+the reply is composed without calling the model; for the hybrid question the
+provision on the right to lodge a complaint, Article 85, is ranked first.
+Generating an answer adds 7--9\,s once the model is loaded.}
+\label{tab:measured}
+\end{table}
+
+\subsection{Limitations}
+
+\begin{itemize}
+  \item Structure is recognised from the numbering and punctuation
+  conventions of formal drafting. A document that does not follow them is
+  chunked without labels and searched by similarity only.
+  \item A question is resolved to one provision at a time. A question relating
+  two provisions (``what does paragraph 3 of this article have to do with
+  Article 7'') retrieves only one of them.
+  \item References to other instruments are recognised and marked, but not
+  followed into other uploaded documents.
+  \item The local 3B model and its 4\,096-token context window limit the
+  passages to about 2\,000 words and keep summaries short; an amount or a
+  condition may be left out of a plain-language summary.
+  \item Printed page numbers are recovered only from PDF files with one
+  sequential numbering; Word and text files have no pages, and scanned PDF
+  files without a text layer are not read.
+  \item The accuracy of answers has not yet been quantified on an annotated
+  set of questions.
+\end{itemize}
+
+\subsection{Future work}
+
+\begin{itemize}
+  \item Retrieve every provision a question names, resolve references such as
+  ``this article'' from the conversation, and give the model the
+  cross-reference path between the provisions, so that relational questions
+  can be answered.
+  \item Build an evaluation set of annotated questions and measure retrieval
+  (whether the expected provision is among the passages) and faithfulness
+  (whether every claim in the answer is supported by a cited passage).
+  \item Add a verification step that checks each sentence of an answer
+  against the passages it cites.
+  \item Follow references to other instruments when those instruments are
+  among the uploaded documents.
+\end{itemize}
+
+\subsection{Summary}
+
+The system implements the RAG technique as a Python pipeline that answers
+questions grounded in uploaded documents and cites its sources. Every answer
+is drawn from retrieved passages, and every passage carries its document,
+printed page and structural reference. What distinguishes it from a generic
+pipeline is that it treats document structure as data. A question that names
+a location is answered by exact lookup instead of similarity, returning exactly
+the part named---or saying that it does not exist. The number of passages
+follows from the question instead of a setting. And the cross-references
+between provisions are extracted into a graph that the reader can follow from
+any answer, through a deliberately simple reference tree.
