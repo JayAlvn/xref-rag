@@ -12,4 +12,6 @@ python-dotenv
 pytest
 python-multipart
 ollama
+psutil
+nvidia-ml-py
 rank-bm25

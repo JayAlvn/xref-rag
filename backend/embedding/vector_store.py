@@ -1,7 +1,8 @@
 import chromadb
+from settings import CHROMA_DIR
 from .embedder import embed_batch, embed_text
 
-client = chromadb.PersistentClient(path='./chroma_db')
+client = chromadb.PersistentClient(path=str(CHROMA_DIR))
 
 collection = client.get_or_create_collection(
     'xref-rag',

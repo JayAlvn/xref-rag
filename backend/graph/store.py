@@ -1,10 +1,8 @@
-import os
 import sqlite3
-
-_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "edges.db")
+from settings import EDGES_DB
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(_DB_PATH)
+    conn = sqlite3.connect(EDGES_DB)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS edges (

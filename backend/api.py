@@ -8,6 +8,7 @@ from pipeline.pipeline import ingest, answer_query, retrieve
 from graph.store import delete_edges
 from graph.neighbourhood import neighbours_of
 from telemetry import snapshot
+from settings import UPLOADS_DIR
 import os, shutil
 
 app = FastAPI(title='X-REF-RAG API')
@@ -58,8 +59,7 @@ class QueryRequest(BaseModel):
 @app.post("/upload")
 def upload(file: UploadFile = File(...)):
 
-    os.makedirs("uploads", exist_ok=True)
-    path = os.path.join("uploads", os.path.basename(file.filename))
+    path = str(UPLOADS_DIR / os.path.basename(file.filename))
 
     with open(path, "wb") as f:
         shutil.copyfileobj(file.file, f)
