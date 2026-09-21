@@ -75,12 +75,16 @@ def _chunk_index(chunk_id: str) -> int:
     return int(tail) if tail.isdigit() else 0
 
 
-def metadata_lookup(conditions: dict, limit: int = 6) -> tuple[list[str], list[dict]]:
-    if not conditions:
-        return [], []
+def metadata_lookup(conditions: dict, limit: int = 6,
+                    where: dict | None = None) -> tuple[list[str], list[dict]]:
+    """Chunks matching every condition, in reading order. `where` takes a
+    ready-made Chroma filter instead, for ranges and alternatives."""
+    if where is None:
+        if not conditions:
+            return [], []
+        where = _where_all(conditions)
 
-    data = collection.get(where=_where_all(conditions),
-                          include=["documents", "metadatas"])
+    data = collection.get(where=where, include=["documents", "metadatas"])
 
     ordered = sorted(zip(data["ids"], data["documents"], data["metadatas"]),
                      key=lambda row: _chunk_index(row[0]))[:limit]
@@ -99,7 +103,12 @@ def get_document_chunks(doc_name: str) -> tuple[list[str], list[dict]]:
     data = collection.get(where={"source": doc_name},
     include=["documents", "metadatas"])
 
-    return data["documents"], data["metadatas"]
+    ordered = sorted(
+        zip(data["ids"], data["documents"], data["metadatas"]),
+        key=lambda row: _chunk_index(row[0]))
+
+    return [row[1] for row in ordered], [row[2] for row in ordered]
+
 
 def list_documents() -> dict[str, int]:
     data = collection.get(include=["metadatas"])
@@ -143,6 +152,11 @@ def get_document_stats(doc_name: str) -> dict:
     keys.discard("page")
     keys.discard("paragraph")
     keys.discard("point")
+    keys.discard("subpoint")
+    keys.discard("subparagraph")
+    keys.discard("page_end")
+    keys.discard("printed_page")
+    keys.discard("printed_page_end")
 
     for key in sorted(keys):
         values = _values_for(metas, key)

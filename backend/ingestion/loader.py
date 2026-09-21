@@ -1,5 +1,5 @@
 import os
-from ingestion.pdf_reader import load_pdf, load_pdf_pages
+from ingestion.pdf_reader import load_pdf, load_pdf_pages, printed_page_numbers
 from ingestion.docx_reader import load_docx
 from ingestion.text_reader import load_txt
 
@@ -30,3 +30,12 @@ def load_document_pages(path: str) -> list[tuple[int, str]]:
 
     return [(1, load_document(path))]
 
+
+
+def load_printed_pages(path: str) -> dict[int, int]:
+    """PDF page -> printed page number, where the document prints one."""
+    extract = os.path.splitext(path)[1].lower()
+    if extract == ".pdf":
+        return printed_page_numbers(path)
+
+    return {}

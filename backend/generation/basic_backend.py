@@ -25,48 +25,45 @@ def _interleave_for_attention(chunks: list[str]) -> list[str]:
     return front + back
 
 class BasicBackend(Base):
-    def generate(self, query: str, chunks: list[str]) -> dict:
+    def generate(self, query: str, chunks: list[str], focus: str | None = None) -> dict:
 
-        ordered_chunks = _interleave_for_attention(chunks)
-        context = "\n\n".join(f"[{i + 1}] {c}" for i, c in enumerate(ordered_chunks))
+        # Reordered for attention, but each passage keeps its own number, so
+        # "[3]" in the answer is Source 3 in the citations pane.
+        numbered = [f"[{i + 1}] {c}" for i, c in enumerate(chunks)]
+        context = "\n\n".join(_interleave_for_attention(numbered))
+
+        # The retrieval sent only the named piece; say so, or the model may
+        # treat its passages as loose matches rather than the text asked about.
+        named = ""
+        if focus:
+            named = f"The question names {focus}. The passages below are that text; answer from them.\n"
 
         prompt = (
-            "You are a fraud-detection assistant analyzing a document.\n"
+            named
+            + "You answer questions about a document using ONLY the numbered "
+            "context passages below.\n"
 
-            "Perform THREE separate tasks using ONLY the context below:\n"
+            "Do two things:\n"
 
-            "1. ANSWER: Answer the user's question DIRECTLY in a brief format. If the question is unrelated "
-            "to fraud, just answer it plainly.\n"
+            "1. ANSWER: answer the question directly and briefly.\n"
 
-            "2. DETAIL: Say where in the document the answer comes from and what "
-            "the surrounding text adds. If the document only names something "
-            "without describing it, say so plainly instead of repeating the name.\n"
+            "2. DETAIL: say where in the document the answer comes from and what "
+            "the surrounding text adds, citing passages by their number, e.g. [2]. "
+            "If the document only names something without describing it, say so "
+            "plainly instead of repeating the name.\n"
 
-            "3. RISK SCAN: INDEPENDENTLY of the question, scan the context for fraud "
-            "indicators — artificial urgency/pressure, changed or offshore bank "
-            "details, missing/verbal-only approvals, amounts just under approval "
-            "thresholds, duplicate invoices, missing deliverables, unverified or "
-            "newly-added vendors, requests not to verify. Always perform this scan "
-            "even if the question is not about fraud.\n"
+            "Do not add anything the passages do not say.\n"
+
+            "If the passages do not contain the answer, say that they do not.\n"
 
             "Respond with a JSON object EXACTLY in this shape:\n"
 
             "{\n"
             '  "answer": "<direct answer to the question, plain text>",\n'
-            '  "detail": "<where in the document it comes from and what it adds>",\n'
-            '  "summary": "<answer to the user question, plain text>",\n'
-    
-            '  "risk_level": "<one of: low, medium, high>",\n'
-            '  "risk_score": <integer 0-100>,\n'
-            '  "factors": [\n'
-            '    {"name": "<short risk factor>", "weight": <integer 0-100>}\n'
-            "  ]\n"
-            "}\n"
-            "If the context genuinely contains no fraud indicators, use low risk, "
-            "score 0, and an empty factors list.\n\n"
+            '  "detail": "<where in the document it comes from and what it adds>"\n'
+            "}\n\n"
             f"Context:\n{context}\n\nQuestion: {query}"
         )
-
 
         response = ollama.chat(
             model=MODEL,
@@ -79,20 +76,16 @@ class BasicBackend(Base):
 
         try:
             data = json.loads(raw)
-            finding = data.get("answer")
-            if finding is None:
-                finding = data.get("summary", raw)
+            finding = data.get("answer", raw)
             detail = data.get("detail", "")
-            risk_level = data.get("risk_level", "unknown")
-            risk_score = int(data.get("risk_score", 0))
-            factors = data.get("factors", [])
+            if finding is None:
+                finding = ""
+            if detail is None:
+                detail = ""
 
         except (json.JSONDecodeError, ValueError, TypeError):
             finding = raw
             detail = ""
-            risk_level = "unknown"
-            risk_score = 0
-            factors = []
 
         prompt_tokens = _grab(response, "prompt_eval_count")
         completion_tokens = _grab(response, "eval_count")
@@ -102,11 +95,6 @@ class BasicBackend(Base):
             "finding": finding,
             "sources": chunks,
             "detail": detail,
-            "risk_level": risk_level,
-            "risk_score": risk_score,
-            "factors": factors,
-            "confidence": 0.0,
-            "mode": "basic (structured risk)",
             "usage": {
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,

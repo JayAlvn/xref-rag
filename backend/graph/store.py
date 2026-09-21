@@ -8,11 +8,13 @@ def _connect() -> sqlite3.Connection:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS edges (
+            position    INTEGER NOT NULL,
+            locator     TEXT NOT NULL,
             document    TEXT NOT NULL,
             source      TEXT NOT NULL,
             target      TEXT NOT NULL,
             edge_type   TEXT NOT NULL,
-            PRIMARY KEY (document, source, target)   
+            PRIMARY KEY (document, source, target, position)   
         )
         """
     )
@@ -27,14 +29,16 @@ def save_edges(document: str, edges: list[tuple]) -> None:
 
     rows = []
 
-    for source, target, edge_type in edges:
-        rows.append((document, source, target, edge_type))
+    for source, target, edge_type, position, locator in edges:
+        rows.append((document, source, target, edge_type, position, locator))
     
     conn = _connect()
     with conn:
         conn.execute("DELETE FROM edges WHERE document = ?", (document,))
         conn.executemany(
-            "INSERT INTO edges (document, source, target, edge_type) VALUES (?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO edges "
+            "(document, source, target, edge_type, position, locator) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             rows,
         )
     conn.close()
@@ -49,8 +53,9 @@ def get_outgoing(document: str, nodes: list[str]) -> list[tuple]:
 
     conn = _connect()
     rows = conn.execute(
-        f"SELECT source, target, edge_type FROM edges "
-        f"WHERE document = ? AND source IN ({placeholders})",
+        f"SELECT source, target, edge_type, position, locator FROM edges "
+        f"WHERE document = ? AND source IN ({placeholders})"
+        f"ORDER BY position",
         (document, *nodes),
     ).fetchall()
 
@@ -67,8 +72,9 @@ def get_incoming(document: str, nodes: list[str]) ->list[tuple]:
     placeholders = ", ".join("?" for _ in nodes)
     conn = _connect()
     rows = conn.execute(
-        f"SELECT source, target, edge_type FROM edges "
-        f"WHERE document = ? AND target IN ({placeholders})",
+        f"SELECT source, target, edge_type, position, locator FROM edges "
+        f"WHERE document = ? AND target IN ({placeholders})"
+        f"ORDER BY position",
         (document, *nodes),
     ).fetchall()
 

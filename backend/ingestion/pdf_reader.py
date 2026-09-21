@@ -1,4 +1,5 @@
 import logging
+import re
 from collections import Counter
 
 logging.basicConfig(level=logging.INFO)
@@ -75,6 +76,71 @@ def load_pdf_pages(path: str) -> list[tuple[int, str]]:
     except Exception as e:
         print(f"Error loading pdf file {e}")
         return []
+
+
+# Where a printed page number lives: the top and bottom strips of the page.
+_MARGIN = 0.08
+
+# A number at either end of a line, or before a slash: "48", "48 TCPS 2 (2022)",
+# "L 176/5", "5/144".
+_EDGE_NUMBERS = re.compile(r"^(\d{1,4})\b|\b(\d{1,4})$|\b(\d{1,4})\s*/\s*\d{1,4}$")
+
+# Share of pages that must agree before a numbering is trusted. A document
+# numbered by subpart ("3.8-2") never reaches it, and gets no printed pages.
+_AGREEMENT = 0.5
+
+
+def _margin_numbers(page) -> set[int]:
+    """Numbers standing at the ends of lines in the page's top and bottom strips."""
+    height = page.rect.height
+    found = set()
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            top = line["bbox"][1]
+            if height * _MARGIN < top < height * (1 - _MARGIN):
+                continue
+            text = "".join(span["text"] for span in line["spans"]).strip()
+            for match in _EDGE_NUMBERS.finditer(text):
+                for value in match.groups():
+                    if value is not None:
+                        found.add(int(value))
+
+    return found
+
+
+def printed_page_numbers(path: str) -> dict[int, int]:
+    """Map each PDF page (1-based) to the number printed on it.
+
+    Front matter pushes the printed numbering behind the PDF's own: TCPS 2
+    prints "48" on PDF page 56. The number sits in the footer the text
+    extraction drops, so it is read by position instead. The gap between PDF
+    page and printed number that most pages agree on is the document's offset.
+    """
+    import fitz
+
+    doc = fitz.open(path)
+    offsets = Counter()
+    for i, page in enumerate(doc):
+        gaps = set()
+        for value in _margin_numbers(page):
+            gaps.add(i + 1 - value)
+        offsets.update(gaps)
+    total = len(doc)
+    doc.close()
+
+    if not offsets:
+        return {}
+
+    offset, agreeing = offsets.most_common(1)[0]
+    if agreeing < max(3, total * _AGREEMENT):
+        return {}
+
+    printed = {}
+    for number in range(1, total + 1):
+        if number - offset >= 1:
+            printed[number] = number - offset
+
+    return printed
 
 
 def load_pdf(path: str) -> str:

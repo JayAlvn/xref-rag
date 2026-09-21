@@ -77,6 +77,8 @@ export function ContextPane({
   glass,
 }: ContextPaneProps) {
   const [uploading, setUploading] = useState(false);
+  // Lets an upload be abandoned. The backend keeps indexing; only the waiting stops.
+  const uploadAbort = useRef<AbortController | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -111,8 +113,14 @@ export function ContextPane({
     // Set when the backend answered but refused the file. A failure with no
     // answer at all means the backend could not be reached.
     let rejection: string | null = null;
+    const controller = new AbortController();
+    uploadAbort.current = controller;
     try {
-      const res = await fetch('http://localhost:8000/upload', { method: 'POST', body: formData });
+      const res = await fetch('http://localhost:8000/upload', {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
       if (!res.ok) {
         rejection = await rejectionMessage(res);
         throw new Error(rejection);
@@ -149,14 +157,22 @@ export function ContextPane({
         if (previous) return [...rest, previous];
         return rest;
       });
-      if (rejection !== null) {
+      if (controller.signal.aborted) {
+        setUploadError(`${file.name}: stopped. The backend may still finish indexing it.`);
+      } else if (rejection !== null) {
         setUploadError(`${file.name}: ${rejection}`);
       } else {
         setUploadError('Upload failed — could not reach the backend on localhost:8000. Is it running?');
       }
     } finally {
+      uploadAbort.current = null;
       setUploading(false);
     }
+  };
+
+  const cancelUpload = () => {
+    const controller = uploadAbort.current;
+    if (controller) controller.abort();
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -215,7 +231,7 @@ export function ContextPane({
       {/* Context Window — real Ollama token usage from the last query */}
       <div className="mb-5">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-[11px] font-semibold tracking-widest uppercase" style={{ color: 'var(--text-muted)' }}>
+          <h3 className="text-[12px] font-semibold tracking-widest uppercase" style={{ color: 'var(--text-muted)' }}>
             Context Window
           </h3>
         </div>
@@ -224,12 +240,12 @@ export function ContextPane({
           <div className="h-full" style={{ width: `${promptPct}%`, backgroundColor: '#22c55e' }} />
           <div className="h-full" style={{ width: `${completionPct}%`, backgroundColor: '#3b82f6' }} />
         </div>
-        <div className="flex justify-between text-sm mb-4">
+        <div className="flex justify-between text-[15px] mb-4">
           <span className="font-semibold tabular-nums">{total.toLocaleString()} / {windowSize.toLocaleString()} tokens</span>
           <span className="font-bold" style={{ color: pct > 80 ? '#ef4444' : '#16a34a' }}>{pct}%</span>
         </div>
 
-        <div className="space-y-2 text-sm">
+        <div className="space-y-2 text-[15px]">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="w-2.5 h-2.5 rounded-sm bg-[#22c55e]" />
@@ -253,7 +269,7 @@ export function ContextPane({
           </div>
         </div>
 
-        <div className="mt-3 pt-3 space-y-1.5 text-sm" style={{ borderTop: '1px solid var(--border-color)' }}>
+        <div className="mt-3 pt-3 space-y-1.5 text-[15px]" style={{ borderTop: '1px solid var(--border-color)' }}>
           <div className="flex justify-between">
             <span style={{ color: 'var(--text-muted)' }}>Session total burned</span>
             <span className="font-bold tabular-nums">{tokensBurned.toLocaleString()}</span>
@@ -278,10 +294,10 @@ export function ContextPane({
 
       {/* Loaded Documents */}
       <div>
-        <h3 className="text-[11px] font-semibold tracking-widest uppercase mb-1" style={{ color: 'var(--text-muted)' }}>
+        <h3 className="text-[12px] font-semibold tracking-widest uppercase mb-1" style={{ color: 'var(--text-muted)' }}>
           Loaded Documents
         </h3>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
+        <p className="text-[13px] mb-3" style={{ color: 'var(--text-muted)' }}>
           Click a document to scope queries to it
         </p>
         <div className="space-y-2">
@@ -327,12 +343,12 @@ export function ContextPane({
                     <FileIcon />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium leading-tight truncate">{doc.name}</p>
-                    <p className="text-xs mt-0.5" style={{ color: subtitleColor }}>
+                    <p className="text-[15px] font-medium leading-tight truncate">{doc.name}</p>
+                    <p className="text-[13px] mt-0.5" style={{ color: subtitleColor }}>
                       {subtitle}
                     </p>
                     {doc.stats && structuralSummary(doc.stats) && (
-                      <p className="text-xs mt-0.5 tabular-nums" style={{ color: 'var(--text-muted)' }}>
+                      <p className="text-[13px] mt-0.5 tabular-nums" style={{ color: 'var(--text-muted)' }}>
                         {structuralSummary(doc.stats)}
                       </p>
                     )}
@@ -344,6 +360,17 @@ export function ContextPane({
                     style={{ color: 'var(--text-muted)' }}
                     className="p-1 shrink-0"
                     aria-label={`Remove ${doc.name}`}
+                  >
+                    <XIcon />
+                  </button>
+                )}
+                {indexing && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); cancelUpload(); }}
+                    style={{ color: 'var(--text-muted)' }}
+                    className="p-1 shrink-0"
+                    title="Stop waiting for this upload"
+                    aria-label={`Stop uploading ${doc.name}`}
                   >
                     <XIcon />
                   </button>
@@ -373,7 +400,7 @@ export function ContextPane({
             <div style={{ color: 'var(--text-muted)' }}>
               <UploadIcon />
             </div>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            <p className="text-[15px]" style={{ color: 'var(--text-muted)' }}>
               {dropText}
             </p>
             <input
@@ -387,7 +414,7 @@ export function ContextPane({
 
           {uploadError && (
             <p
-              className="text-xs px-1 pt-1"
+              className="text-[13px] px-1 pt-1"
               style={{ color: '#ef4444' }}
               role="alert"
             >

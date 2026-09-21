@@ -1,0 +1,168 @@
+\section{Retrieval}
+\label{sec:retrieval}
+
+Retrieval decides which passages the language model sees, and therefore bounds
+what any answer can say. It has two paths. A question that names a location in
+a document is answered by \emph{exact lookup} on the stored labels; any other
+question goes to \emph{hybrid search}, which combines semantic and lexical
+similarity. The router tries exact lookup first and falls back to hybrid search
+when the question names nothing or nothing carries the named labels. Besides
+the passages, it returns a note stating whether the lookup was exact, which
+subdivision the question asked for, whether that subdivision was found, and,
+if not, what the provision contains instead (\cref{sec:structure}).
+
+\subsection{Hybrid search}
+
+\paragraph{Dense ranking.} The question is embedded with the same model as the
+passages, and every chunk in scope---one selected document or the whole
+collection---is ranked by cosine distance to it.
+
+\paragraph{Lexical ranking.} The same chunks are ranked by Okapi
+BM25~\cite{robertson2009bm25} over lower-cased word tokens.
+
+\paragraph{Fusion.} The two rankings are combined by reciprocal rank
+fusion~\cite{cormack2009rrf} (\cref{lst:rrf}). Each chunk $d$ scores
+\begin{equation}
+  \operatorname{RRF}(d) = \sum_{r \in \{\mathrm{dense},\, \mathrm{BM25}\}}
+  \frac{1}{k + \operatorname{rank}_r(d)}, \qquad k = 60,
+\end{equation}
+where $\operatorname{rank}_r(d)$ is the chunk's position in ranking $r$,
+counted from 0.
+
+\begin{lstlisting}[float, language=Python, caption={Reciprocal rank fusion
+(\texttt{retrieval/hybrid.py}).}, label={lst:rrf}]
+def _rrf(rank_list: list[list[str]], k: int = 60) -> dict:
+    scores: dict[str, float] = {}
+    for ranking in rank_list:
+        for rank, _id in enumerate(ranking):
+            scores[_id] = scores.get(_id, 0.0) + 1.0 / (k + rank)
+    return scores
+\end{lstlisting}
+
+\paragraph{Trade-offs.} The two rankings fail in complementary ways. Dense
+embeddings capture paraphrase---``who can complain'' finds a provision on the
+right to lodge a complaint---but blur exact tokens: numbers, amounts and
+defined terms (``Article~92'', ``EUR~15\,000\,000'') contribute little to a
+sentence vector. BM25 matches exact tokens but knows nothing of synonyms.
+Fusing by rank rather than by score avoids having to reconcile two
+incomparable scales, a bounded cosine distance and an unbounded BM25 score,
+and needs no tuned weights. The cost is that magnitudes are discarded: a
+passage far ahead in one ranking gets no more credit than one narrowly ahead.
+The BM25 index is rebuilt over the chunks in scope for each question. Over the
+2\,019 chunks of the AI Act, hybrid retrieval takes about 235\,ms in total,
+which is small beside generation; a collection orders of magnitude larger
+would need a persistent inverted index instead.
+
+\subsection{Exact lookup for named locations}
+
+\paragraph{Parsing the question.} A pattern finds unit words followed by a
+number (``article 66'', ``Art.~66'', ``articles no.~5'', ``page 48'',
+``section 3.13''). Plain numbers become integers and anything else upper-cased
+text, matching how the labels were stored (\texttt{3.7a} matches
+\texttt{3.7A}). Some conventions name a unit by another word, so a unit is
+also tried under an alternative reading: in EU acts, ``clause 148'' means
+recital 148, and ``section 5'' may mean article 5. A question that matches
+nothing is checked for a mistyped unit word: any word of four to ten letters
+followed by a number is compared with the unit vocabulary, and a similarity
+ratio of at least 0.75 accepts it, so ``artilce 66'' is read as article 66.
+
+\paragraph{Building filters.} Each named unit becomes one or more filters on
+the stored metadata. A page becomes a range condition, because a chunk may run
+over two pages: first on the printed page numbers, then on the PDF's own page
+numbers (\cref{lst:page}). When a question names several units, all of them
+are combined first, so that ``chapter 3 page 48'' retrieves the passages on
+printed page 48 \emph{within} chapter 3. Only if no chunk carries them all is
+each unit tried on its own, the most specific first: page, then recital,
+clause, rule, article, section, annex, schedule, chapter and part. Trying the
+units separately from the outset returns chapter 3's opening passages for that
+question, because ``chapter 3'' alone matches first; the combination is what
+lets a page be addressed inside a chapter.
+
+\begin{lstlisting}[float, language=Python, caption={Filters for one named unit; a
+page matches every chunk that runs over it (\texttt{retrieval/hybrid.py}).},
+label={lst:page}]
+def _alternatives(field, value):
+    if field != "page":
+        return [{field: {"$eq": value}}]
+    if not isinstance(value, int):
+        return []
+
+    return [
+        {"$and": [{"printed_page": {"$lte": value}},
+                  {"printed_page_end": {"$gte": value}}]},
+        {"$and": [{"page": {"$lte": value}},
+                  {"page_end": {"$gte": value}}]},
+        {"page": {"$eq": value}},
+    ]
+\end{lstlisting}
+
+\paragraph{Returning the provision.} The first filter that matches returns
+every chunk of the provision, up to 200, in reading order---not the
+$k$ most similar chunks. A named provision is the answer to ``what does it
+say'' in full, and similarity has no role in deciding which of its parts
+matter. The subdivisions inside it are handled in \cref{sec:structure}.
+
+\paragraph{Trade-offs.} Exact lookup is deterministic and explainable: the
+same question always returns the same passages, and the interface can say
+``exact match'' instead of presenting a similarity score as if it measured
+correctness. It is also fast, taking 3--6\,ms against roughly 235\,ms for
+hybrid search. Its weakness is that it depends on the question naming units in
+a form the parser recognises. A form it does not recognise falls through to
+hybrid search, so the worst case is the behaviour of an ordinary RAG system,
+never an empty answer.
+
+\subsection{Deciding how many passages}
+
+Early versions let the user choose how many passages to retrieve, between 2
+and 12. A fixed number fits no question well: it truncates a long provision
+that was named in full, and it pads a focused question with passages that
+merely share its vocabulary. The number is now decided by the system, from
+what the question asked for:
+
+\begin{itemize}
+  \item \textbf{A named subdivision} (``paragraph 2 of Article 7''): exactly
+  the chunks that carry the requested labels, which for a paragraph includes
+  all of its points and sub-points (\cref{sec:structure}).
+  \item \textbf{A named provision} (``Article 93''): the whole provision in
+  reading order.
+  \item \textbf{Any other question}: the candidates that score close to the
+  best one. Of the twelve best candidates after fusion, candidate $i$
+  (counted from 0) is kept if
+  \begin{equation}
+    i < 3 \quad\text{or}\quad s_i \geq \max_j s_j - 0.15,
+  \end{equation}
+  where $s_i$ is its cosine similarity to the question, and at most eight are
+  kept (\cref{lst:close}).
+\end{itemize}
+
+On every path the passages are then admitted in order while their total length
+stays within 2\,000 words. At about 1.4 tokens per word this is roughly 2\,800
+tokens, which leaves room in the model's 4\,096-token context window for the
+instructions and the answer.
+
+\begin{lstlisting}[float, language=Python, caption={Keeping the passages close to the
+best one (\texttt{retrieval/hybrid.py}).}, label={lst:close}]
+def _close_to_best(chunks, distances, metas):
+    if not distances:
+        return chunks, distances, metas
+
+    best = 1 - min(distances)
+    keep = []
+    for i, distance in enumerate(distances):
+        if i < _FEWEST or 1 - distance >= best - _MARGIN:
+            keep.append(i)
+    keep = keep[:_MOST]
+
+    return ([chunks[i] for i in keep], [distances[i] for i in keep],
+            [metas[i] for i in keep])
+\end{lstlisting}
+
+\paragraph{Trade-offs.} The margin is relative rather than absolute because
+similarities between a question and the passages of one document cluster
+tightly: for typical questions on the AI Act the top twelve candidates fell
+between 0.57 and 0.86, so an absolute threshold would keep everything for one
+question and nothing for the next. The minimum of three protects against a
+lone passage cut mid-sentence, and the maximum of eight against a question so
+generic that everything scores alike. The margin and bounds were set by
+inspecting score distributions on the development corpora rather than learned,
+and they fix only the upper limit; the context budget decides the rest.
