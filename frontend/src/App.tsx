@@ -1,26 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Group, Panel, Separator, type GroupImperativeHandle, type Layout, type PanelImperativeHandle } from 'react-resizable-panels';
+import { Group, Panel, Separator, type GroupImperativeHandle, type Layout } from 'react-resizable-panels';
 import { THEMES, ThemeColors } from './lib/themes';
-import type { RetrievalItem, Message, Turn, Risk, Confidence, Usage, Doc, RefGraphData } from './lib/utils';
-import { EMPTY_GRAPH, fetchDocStats, fetchDocuments } from './lib/utils';
+import type { RetrievalItem, Message, Turn, Lookup, Usage, Doc, RefGraphData } from './lib/utils';
+import { EMPTY_GRAPH, fetchDocStats, fetchDocuments, lookupLabel } from './lib/utils';
 import { useMachineStats } from './lib/useMachineStats';
 import { MessageSquareIcon, PanelRightIcon } from './components/Icons';
-import { FindingPane } from './components/FindingPane';
 import { CitationPane } from './components/CitationPane';
 import { ChatPane } from './components/ChatPane';
 import { ContextPane } from './components/ContextPane';
-import { CornerResizer } from './components/CornerResizer';
 import { useFold } from './lib/useFold';
 import './App.css';
 
 const EMPTY_USAGE: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, context_window: 4096 };
 
-/* Height the analysis pane folds down to: its header row, chevron included. */
-const FINDING_HEADER = 56;
-
-/* Smallest shares of the window, in percent, for the analysis column and the
-   chat. CornerResizer.tsx keeps to the same limits. */
+/* Smallest shares of the window, in percent, for the citations column and the chat. */
 const LEFT_MIN = 20;
 const CHAT_MIN = 20;
 
@@ -56,14 +50,10 @@ function App() {
   const [citations, setCitations] = useState<string[]>([]);
   const [retrieval, setRetrieval] = useState<RetrievalItem[]>([]);
   const [graph, setGraph] = useState<RefGraphData>(EMPTY_GRAPH);
-  const [risk, setRisk] = useState<Risk>({ level: '', score: 0, factors: [] });
-  const [confidence, setConfidence] = useState<Confidence>({ level: '', score: 0 });
-  const [mode, setMode] = useState<'naive' | 'basic'>('basic');
+  const [lookup, setLookup] = useState<Lookup | null>(null);
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatVisible, setChatVisible] = useState(true);
-  const [findingCollapsed, setFindingCollapsed] = useState(false);
-  const [sourceCount, setSourceCount] = useState(4);
 
   // The native frosted effect behind the window (src-tauri/src/lib.rs):
   // macOS and Windows only. Linux and browser tabs stay solid.
@@ -81,13 +71,16 @@ function App() {
   // Message identity has to survive list growth, so it can't be the array index.
   const nextId = useRef(0);
 
+  // Lets a running query be abandoned. The backend finishes it regardless;
+  // only the waiting stops.
+  const queryAbort = useRef<AbortController | null>(null);
+
   const [lastMs, setLastMs] = useState<number | null>(null);
 
   // Polls fast while generating, slowly when idle.
   const machine = useMachineStats(loading);
 
   // The chat panel is collapsed rather than unmounted, so widths you drag survive the toggle.
-  const findingPanel = useRef<PanelImperativeHandle | null>(null);
   const chatOpenShare = useRef(22);  // % of the window the chat last had while open
 
   // The context pane folds away from the toolbar the same way.
@@ -97,22 +90,14 @@ function App() {
   const [contextVisible, setContextVisible] = useState(true);
   const [contextPin, setContextPin] = useState<number | null>(null);
 
-  // The corner grip where the analysis/citations gap meets the left column's
-  // edge drives both groups at once, so it needs their handles and elements.
   const appRef = useRef<HTMLDivElement | null>(null);
   const mainGroup = useRef<GroupImperativeHandle | null>(null);
-  const leftGroup = useRef<GroupImperativeHandle | null>(null);
-  const leftPanelEl = useRef<HTMLDivElement | null>(null);
-  const findingPanelEl = useRef<HTMLDivElement | null>(null);
 
   // Folding panes are held at their open size, so content slides instead of re-wrapping.
   const chatPanelEl = useRef<HTMLDivElement | null>(null);
   const chatOpenWidth = useRef(0);
-  const findingOpenHeight = useRef(0);
   const [chatPin, setChatPin] = useState<number | null>(null);
-  const [findingPin, setFindingPin] = useState<number | null>(null);
   const mainFold = useFold();
-  const leftFold = useFold();
 
   // Lifted up from ContextPane so they survive the chat-toggle remount:
   const [documents, setDocuments] = useState<Doc[]>([]);
@@ -165,16 +150,12 @@ function App() {
   // is in motion and not one worth holding the content at.
   useEffect(() => {
     const chatEl = chatPanelEl.current;
-    const findingEl = findingPanelEl.current;
-    if (!chatEl || !findingEl) return;
+    if (!chatEl) return;
     const observer = new ResizeObserver(() => {
       const width = chatEl.getBoundingClientRect().width;
       if (!mainFold.foldingRef.current && width > 0) chatOpenWidth.current = width;
-      const height = findingEl.getBoundingClientRect().height;
-      if (!leftFold.foldingRef.current && height > FINDING_HEADER + 1) findingOpenHeight.current = height;
     });
     observer.observe(chatEl);
-    observer.observe(findingEl);
     return () => observer.disconnect();
   }, []);
 
@@ -249,26 +230,56 @@ function App() {
     setContextVisible(opening);
   };
 
-  // Collapse through the panel: the Group owns the height, so hiding the body alone
-  // would strand the header.
-  const toggleFinding = () => {
-    const panel = findingPanel.current;
-    if (!panel) return;
-    const opening = panel.isCollapsed();
-    leftFold.fold(
-      () => {
-        if (opening) {
-          panel.expand();
-        } else {
-          panel.collapse();
-        }
-      },
-      () => {
-        if (findingOpenHeight.current > 0) setFindingPin(findingOpenHeight.current);
-      },
-      () => setFindingPin(null),
-    );
-    setFindingCollapsed(!opening);
+  const say = (text: string) => {
+    setMessages(prev => [...prev, { id: ++nextId.current, role: 'assistant', content: text }]);
+  };
+
+  /** Run a typed command. Everything here is local or retrieval-only: none of
+   *  these spends a model call, which is why they come back instantly. */
+  const runCommand = (name: string, argument: string, typed: string) => {
+    if (name === 'find') {
+      if (argument === '') {
+        say('find: needs something to look for, e.g. "find: initial capital".');
+        return;
+      }
+      sendPrompt(argument, true, typed);
+      return;
+    }
+
+    if (name === 'doc') {
+      if (argument === '' || argument.toLowerCase() === 'all') {
+        setActiveDoc(null);
+        say('Asking about all documents.');
+        return;
+      }
+      const match = documents.find(d => d.name.toLowerCase().includes(argument.toLowerCase()));
+      if (match) {
+        setActiveDoc(match.name);
+        say(`Asking about ${match.name}.`);
+      } else {
+        say(`No loaded document matches "${argument}".`);
+      }
+      return;
+    }
+
+    if (name === 'clear') {
+      setMessages([]);
+      setActiveTurnId(null);
+      setCitations([]);
+      setRetrieval([]);
+      setGraph(EMPTY_GRAPH);
+      setLookup(null);
+      return;
+    }
+
+    if (name === 'help') {
+      say([
+        'find: initial capital — passages by keyword and meaning',
+        'doc: celex — ask about one document, or "doc: all"',
+        'Tab after a, para, p, sec, cha — article, paragraph, point, section, chapter',
+        'clear — empty this conversation',
+      ].join('\n'));
+    }
   };
 
   /** Repoint the panes at an answer already in the transcript. No refetch --
@@ -279,22 +290,38 @@ function App() {
     setCitations(t.citations);
     setRetrieval(t.retrieval);
     setGraph(t.graph);
-    setRisk(t.risk);
-    setConfidence(t.confidence);
+    setLookup(t.lookup);
     setUsage(t.usage);
     setLastMs(t.ms);
     setActiveTurnId(message.id);
   };
 
-  const sendPrompt = async (prompt: string) => {
+  const cancelQuery = () => {
+    const controller = queryAbort.current;
+    if (controller) controller.abort();
+  };
+
+  /** A question goes to /query (retrieval-augmented generation). A lookup --
+   *  find: -- goes to /retrieve and gets passages without an answer;
+   *  `label` keeps what was typed in the transcript. */
+  const sendPrompt = async (prompt: string, lookupOnly = false, label?: string) => {
     const started = performance.now();
-    setMessages(prev => [...prev, { id: ++nextId.current, role: 'user', content: prompt }]);
+    let shown = prompt;
+    if (label) shown = label;
+    let endpoint = 'http://localhost:8000/query';
+    if (lookupOnly) endpoint = 'http://localhost:8000/retrieve';
+
+    setMessages(prev => [...prev, { id: ++nextId.current, role: 'user', content: shown }]);
     setLoading(true);
+
+    const controller = new AbortController();
+    queryAbort.current = controller;
     try {
-      const res = await fetch('http://localhost:8000/query', {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: prompt, mode, source: activeDoc, n: sourceCount }),
+        body: JSON.stringify({ query: prompt, source: activeDoc }),
+        signal: controller.signal,
       });
       if (!res.ok) {
         const detail = await res.text();
@@ -304,18 +331,27 @@ function App() {
 
       // Assembled once, then used for both the live panes and the transcript
       // card, so the two can never drift apart.
+      // A lookup has no generated answer; its card says what was found instead.
+      let finding = data.finding;
+      if (lookupOnly) {
+        const count = (data.sources ?? []).length;
+        finding = `${lookupLabel(data.lookup ?? null)} — ${count} passages in Citations.`;
+      }
+
+      let kind: Turn['kind'] = 'answer';
+      if (lookupOnly) kind = 'lookup';
+
+      let detail = '';
+      if (typeof data.detail === 'string') detail = data.detail;
+
       const turn: Turn = {
-        finding: data.finding,
-        mode,
+        finding,
+        detail,
+        kind,
         citations: data.sources ?? [],
         retrieval: data.retrieval ?? [],
         graph: data.graph ?? EMPTY_GRAPH,
-        risk: {
-          level: data.risk_level ?? '',
-          score: data.risk_score ?? 0,
-          factors: data.factors ?? [],
-        },
-        confidence: { level: data.confidence_level ?? '', score: data.confidence ?? 0 },
+        lookup: data.lookup ?? null,
         usage: data.usage ?? EMPTY_USAGE,
         timings: data.timings ?? null,
         ms: performance.now() - started,
@@ -324,8 +360,7 @@ function App() {
       setCitations(turn.citations);
       setRetrieval(turn.retrieval);
       setGraph(turn.graph);
-      setRisk(turn.risk);
-      setConfidence(turn.confidence);
+      setLookup(turn.lookup);
       setUsage(turn.usage);
       setTokensBurned(t => t + (turn.usage.total_tokens ?? 0));
 
@@ -333,17 +368,21 @@ function App() {
       setMessages(prev => [...prev, { id, role: 'assistant', content: turn.finding, turn }]);
       setActiveTurnId(id);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
+      let msg = 'Unknown error';
+      if (err instanceof Error) msg = err.message;
+
+      let bubble = `Error: ${msg}`;
+      if (controller.signal.aborted) bubble = 'Stopped. The backend may still be finishing this query.';
       setCitations([]);
       setRetrieval([]);
       setGraph(EMPTY_GRAPH);
-      setRisk({ level: '', score: 0, factors: [] });
-      setConfidence({ level: '', score: 0 });
+      setLookup(null);
       setUsage(EMPTY_USAGE);
       // No turn attached: a failed query has no evidence to restore, which is
       // what keeps the error bubble unclickable.
-      setMessages(prev => [...prev, { id: ++nextId.current, role: 'assistant', content: `Error: ${msg}` }]);
+      setMessages(prev => [...prev, { id: ++nextId.current, role: 'assistant', content: bubble }]);
     } finally {
+      queryAbort.current = null;
       setLastMs(performance.now() - started);
       setLoading(false);
     }
@@ -353,9 +392,6 @@ function App() {
   // of a fold, so dragging a separator stays immediate.
   let mainGroupClass = 'h-full w-full';
   if (mainFold.folding) mainGroupClass += ' panels-folding';
-  let leftGroupClass = 'h-full w-full';
-  if (leftFold.folding) leftGroupClass += ' panels-folding';
-
   // With the chat hidden its gutter closes and is disabled, so a zero-width seam can't be grabbed.
   let chatSeparatorStyle: React.CSSProperties | undefined;
   if (!chatVisible) chatSeparatorStyle = { width: 0 };
@@ -374,7 +410,7 @@ function App() {
   // The toolbar floats over the top-right corner, so whichever pane is
   // rightmost keeps its header controls clear of it.
   const chatUnderToolbar = !contextVisible && chatVisible;
-  const findingUnderToolbar = !contextVisible && !chatVisible;
+  const citationsUnderToolbar = !contextVisible && !chatVisible;
 
   // The native materials tint what they blur, so the surface only washes over them.
   let surfaceColor = 'var(--app-bg)';
@@ -435,50 +471,21 @@ function App() {
       {/* Main Layout */}
       <Group orientation="horizontal" className={mainGroupClass} groupRef={mainGroup}>
 
-        {/* Left: Finding (top) + Citations (bottom), independently resizable */}
-        <Panel id="left" defaultSize="56%" minSize={`${LEFT_MIN}%`} className="min-w-0" elementRef={leftPanelEl}>
-          <Group orientation="vertical" className={leftGroupClass} groupRef={leftGroup}>
-            <Panel
-              id="finding"
-              defaultSize={59}
-              minSize={15}
-              collapsible
-              // Leaves the header row visible when collapsed, so the chevron
-              // stays reachable. String sizes take CSS units.
-              collapsedSize={`${FINDING_HEADER}px`}
-              panelRef={findingPanel}
-              elementRef={findingPanelEl}
-              // Dragging the divider past minSize collapses the panel too, so
-              // read the collapsed state back rather than trusting the button.
-              onResize={() => {
-                const panel = findingPanel.current;
-                if (panel) setFindingCollapsed(panel.isCollapsed());
-              }}
-              className="overflow-hidden rounded-lg border"
-              // The library scrolls a panel's content by default; a pane held
-              // at its open size mid-fold has to be clipped instead.
-              style={{ overflow: 'hidden' }}
-            >
-              <FindingPane
-                loading={loading}
-                mode={mode}
-                risk={risk}
-                confidence={confidence}
-                graph={graph}
-                accent={theme.accent}
-                collapsed={findingCollapsed}
-                onToggleCollapse={toggleFinding}
-                pinHeight={findingPin}
-                toolbarInset={findingUnderToolbar}
-              />
-            </Panel>
-
-            <Separator className="panel-separator panel-separator-vertical" />
-
-            <Panel id="citations" defaultSize={41} minSize={15} className="overflow-hidden rounded-lg border">
-              <CitationPane citations={citations} retrieval={retrieval} />
-            </Panel>
-          </Group>
+        {/* Left: the retrieved passages, with what each one cites. */}
+        <Panel
+          id="left"
+          defaultSize="56%"
+          minSize={`${LEFT_MIN}%`}
+          className="overflow-hidden rounded-lg border"
+        >
+          <CitationPane
+            citations={citations}
+            retrieval={retrieval}
+            graph={graph}
+            lookup={lookup}
+            loading={loading}
+            toolbarInset={citationsUnderToolbar}
+          />
         </Panel>
 
         <Separator
@@ -507,12 +514,10 @@ function App() {
             <ChatPane
               messages={messages}
               onSend={sendPrompt}
+              onCommand={runCommand}
+              onCancel={cancelQuery}
               loading={loading}
-              mode={mode}
-              setMode={setMode}
               activeDoc={activeDoc}
-              sourceCount={sourceCount}
-              setSourceCount={setSourceCount}
               modelLoaded={machine?.model?.loaded ?? null}
               onSelectTurn={restoreTurn}
               activeTurnId={activeTurnId}
@@ -562,13 +567,6 @@ function App() {
 
       </Group>
 
-      <CornerResizer
-        root={appRef}
-        mainGroup={mainGroup}
-        leftGroup={leftGroup}
-        leftPanel={leftPanelEl}
-        findingPanel={findingPanelEl}
-      />
     </div>
   );
 }

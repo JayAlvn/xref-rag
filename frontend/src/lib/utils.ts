@@ -4,27 +4,97 @@ export const TOOLBAR_CLEARANCE = 160;
 /** One retrieved passage. Location fields are absent for documents indexed without structure. */
 export type RetrievalItem = {
   source: string;
-  score: number;
   page?: number;
+  printed_page?: number;  // the number printed on the page, where the document has one
   recital?: number;
-  article?: number;
+  article?: number | string;
   chapter?: string;
+  section?: number | string;
+  annex?: string;
+  paragraph?: number;
+  subparagraph?: number;  // text after a paragraph's list of points: 2 onwards
+  point?: string;
+  subpoint?: string;
   document?: string;
 };
 
-/** Provenance for a citation card: "p. 37 · recital 148". */
+const ORDINALS = ['', 'first', 'second', 'third', 'fourth', 'fifth'];
+
+/** "second subparagraph", or "subparagraph 7" past the named ones. */
+function subparagraphText(n: number): string {
+  if (n < ORDINALS.length) return `${ORDINALS[n]} subparagraph`;
+  return `subparagraph ${n}`;
+}
+
+/** Provenance for a citation card: "p. 97 · Article 66(2)(e)(iv)",
+ *  "p. 118 · Article 101(1), second subparagraph". */
 export function locationLabel(item?: RetrievalItem): string {
   if (!item) return '';
+
   const parts: string[] = [];
-  if (item.page !== undefined) parts.push(`p. ${item.page}`);
+  // The number a reader sees on the page, not the PDF's own count.
+  if (item.printed_page !== undefined) {
+    parts.push(`p. ${item.printed_page}`);
+  } else if (item.page !== undefined) {
+    parts.push(`p. ${item.page}`);
+  }
   if (item.recital !== undefined) parts.push(`recital ${item.recital}`);
-  if (item.article !== undefined) parts.push(`Article ${item.article}`);
+
+  // Subdivisions read as one reference, the way a lawyer would write it.
+  if (item.article !== undefined) {
+    let reference = `Article ${item.article}`;
+    if (item.paragraph !== undefined) reference += `(${item.paragraph})`;
+    if (item.point !== undefined) reference += `(${item.point})`;
+    if (item.subpoint !== undefined) reference += `(${item.subpoint})`;
+    if (item.subparagraph !== undefined) reference += `, ${subparagraphText(item.subparagraph)}`;
+    parts.push(reference);
+  }
+
+  if (item.annex) parts.push(`Annex ${item.annex}`);
   if (item.chapter) parts.push(`Ch. ${item.chapter}`);
   return parts.join(' · ');
 }
 
-export type Risk = { level: string; score: number; factors: { name: string; weight: number }[] };
-export type Confidence = { level: string; score: number };
+// The units a graph node can be, most specific first (backend/graph/build.py).
+const NODE_KINDS = ['recital', 'article', 'clause', 'rule', 'section',
+  'annex', 'schedule', 'appendix', 'exhibit', 'chapter', 'part', 'title'] as const;
+
+/** The graph node a passage belongs to: "EU-AI.pdf::article:66". Null without a label. */
+export function nodeIdOf(item?: RetrievalItem): string | null {
+  if (!item || !item.document) return null;
+
+  const where = item as Record<string, unknown>;
+  for (const kind of NODE_KINDS) {
+    const value = where[kind];
+    if (value !== undefined && value !== null) return `${item.document}::${kind}:${value}`;
+  }
+  return null;
+}
+
+/** How the passages were found: an exact lookup on a named provision, or the
+ *  closest matches by similarity. `asked` is the subdivision the question named. */
+export type Lookup = {
+  exact: boolean;
+  found: boolean;
+  asked: { paragraph?: number; subparagraph?: number; point?: string; subpoint?: string };
+};
+
+/** "Exact match · Article 66, point d", or what went wrong with it. */
+export function lookupLabel(lookup: Lookup | null): string {
+  if (lookup === null) return '';
+
+  const named: string[] = [];
+  if (lookup.asked.paragraph !== undefined) named.push(`paragraph ${lookup.asked.paragraph}`);
+  if (lookup.asked.subparagraph !== undefined) named.push(subparagraphText(lookup.asked.subparagraph));
+  if (lookup.asked.point !== undefined) named.push(`point ${lookup.asked.point}`);
+  if (lookup.asked.subpoint !== undefined) named.push(`point (${lookup.asked.subpoint})`);
+
+  if (!lookup.exact) return 'Closest passages by keyword and meaning';
+  if (named.length === 0) return 'Exact match on the provision named';
+  if (lookup.found) return `Exact match · ${named.join(' · ')}`;
+  return `${named.join(' · ')} not found in that provision`;
+}
+
 export type Usage = {
   prompt_tokens: number; completion_tokens: number;
   total_tokens: number; context_window: number;
@@ -33,6 +103,16 @@ export type Usage = {
 /** retrieved: fetched for the question; internal: a cited provision in the document;
  *  external: another document; missing: a self-reference no passage resolves to. */
 export type GraphNodeKind = 'retrieved' | 'internal' | 'external' | 'missing';
+
+/** What a node's kind means, for the detail card. */
+export function kindText(kind: GraphNodeKind): string {
+  if (kind === 'retrieved') return 'Retrieved for this question.';
+  if (kind === 'internal') return 'A provision in this document, cited by one above it.';
+  if (kind === 'external') {
+    return 'Another document, cited by name. It is not in your corpus, so its text cannot be shown.';
+  }
+  return 'Cited as part of this document, but no passage carries that label: a parsing gap, or a reference to something that does not exist.';
+}
 
 /** A box in the graph (backend/graph/neighbourhood.py). `depth` is its distance in arrows from a retrieved passage. */
 export type GraphNode = {
@@ -45,11 +125,14 @@ export type GraphNode = {
   preview?: string;
 };
 
-/** An arrow: `from` cites `to`. */
+/** An arrow: `from` cites `to`. `index` numbers the references of one provision
+ *  in reading order; `locator` is where in it the reference sits ("point e"). */
 export type GraphEdge = {
   from: string;
   to: string;
   type: string;
+  index?: number;
+  locator?: string;
 };
 
 export type RefGraphData = {
@@ -62,12 +145,13 @@ export const EMPTY_GRAPH: RefGraphData = { nodes: [], edges: [] };
 /** Everything the panes need to redisplay one answer without re-querying. */
 export type Turn = {
   finding: string;
-  mode: 'naive' | 'basic';  // a naive answer is the passages themselves, so its chat card shows one line
+  /** Where in the document the answer comes from, citing passages as [n]. */
+  detail: string;
+  kind: 'answer' | 'lookup';  // a lookup (find:) retrieves without generating
   citations: string[];
   retrieval: RetrievalItem[];
   graph: RefGraphData;
-  risk: Risk;
-  confidence: Confidence;
+  lookup: Lookup | null;
   usage: Usage;
   timings: { retrieval_ms: number; generation_ms: number } | null;
   ms: number;
@@ -142,7 +226,56 @@ export async function fetchDocuments(): Promise<Doc[] | null> {
   return data.map(d => ({ id: d.name, name: d.name, chunks: d.chunks }));
 }
 
+/** A provision's own text, in order (GET /document/{name}/provision).
+ *  Null when the backend can't be reached or has no such endpoint yet. */
+export async function fetchProvision(document: string, node: string): Promise<string[] | null> {
+  const [kind, value] = node.split(':');
+  if (!kind || value === undefined) return null;
+
+  const path = `http://localhost:8000/document/${encodeURIComponent(document)}/provision`;
+  const query = `?kind=${encodeURIComponent(kind)}&value=${encodeURIComponent(value)}`;
+
+  try {
+    const res = await fetch(path + query);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!Array.isArray(data)) return null;
+    return data as string[];
+  } catch {
+    return null;
+  }
+}
+
+/** One reference of a provision, numbered in the order it appears in the text. */
+export type Neighbour = {
+  node: string;
+  label: string;
+  type: string;
+  index: number;
+  locator: string;
+};
+
+export type Neighbours = {
+  node: string;
+  label: string;
+  cites: Neighbour[];
+  cited_by: Neighbour[];
+};
+
+/** What a provision cites and what cites it (GET /document/{name}/neighbours). */
+export async function fetchNeighbours(document: string, node: string): Promise<Neighbours | null> {
+  const path = `http://localhost:8000/document/${encodeURIComponent(document)}/neighbours`;
+
+  try {
+    const res = await fetch(`${path}?node=${encodeURIComponent(node)}`);
+    if (!res.ok) return null;
+    return await res.json() as Neighbours;
+  } catch {
+    return null;
+  }
+}
+
 /** Drop Private Use Area characters: PDF bullet glyphs (Symbol, Wingdings) that render as boxes. */
 export function stripPua(text: string): string {
-  return text.replace(/[-]/g, '');
+  return text.replace(/[\uE000-\uF8FF]/g, '');
 }
