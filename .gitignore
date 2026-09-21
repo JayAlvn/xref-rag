@@ -8,3 +8,4 @@ backend/uploads/
 edges.db
 backend/build/
 backend/dist/
+frontend/src-tauri/binaries/

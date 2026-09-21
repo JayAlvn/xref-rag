@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "package": "tauri build --config src-tauri/tauri.release.conf.json"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",
