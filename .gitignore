@@ -6,3 +6,5 @@ backend/chroma_db/
 backend/uploads/
 .env
 edges.db
+backend/build/
+backend/dist/
