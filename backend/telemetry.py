@@ -88,9 +88,9 @@ def _model() -> dict | None:
     next query pays a full reload before it emits a single token -- which is
     what the UI warns about before you press send.
     """
-    import ollama
+    from generation import runtime
     try:
-        running = ollama.ps().models
+        running = runtime.client().ps().models
     except Exception:
         return None
     if not running:

@@ -10,7 +10,7 @@ binaries = []
 hiddenimports = []
 
 # These load parts of themselves at run time, out of PyInstaller's sight.
-for package in ("chromadb", "chromadb_rust_bindings", "onnxruntime", "tokenizers", "pymupdf"):
+for package in ("chromadb", "chromadb_rust_bindings", "onnxruntime", "tokenizers", "pymupdf", "zstandard"):
     package_datas, package_binaries, package_imports = collect_all(package)
     datas += package_datas
     binaries += package_binaries

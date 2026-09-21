@@ -1,8 +1,7 @@
-import ollama
 import json
+from generation import runtime
 from generation.base import Base
-
-MODEL = "llama3.2"
+from settings import MODEL
 
 CONTEXT_WINDOW= 4096 #sized for gtx1650
 
@@ -23,6 +22,10 @@ def _interleave_for_attention(chunks: list[str]) -> list[str]:
     back.reverse()
 
     return front + back
+
+# Whichever Ollama the runtime found or set up.
+def _chat(**request):
+    return runtime.client().chat(**request)
 
 class BasicBackend(Base):
     def generate(self, query: str, chunks: list[str], focus: str | None = None) -> dict:
@@ -65,7 +68,7 @@ class BasicBackend(Base):
             f"Context:\n{context}\n\nQuestion: {query}"
         )
 
-        response = ollama.chat(
+        response = _chat(
             model=MODEL,
             messages=[{"role": "user", "content": prompt}],
             format="json",

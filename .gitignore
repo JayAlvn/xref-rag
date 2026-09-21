@@ -9,3 +9,9 @@ edges.db
 backend/build/
 backend/dist/
 frontend/src-tauri/binaries/
+backend/ollama/
+backend/ollama-unpacking/
+backend/models/
+backend/ollama.pid
+backend/ollama.log
+backend/ollama-download.part
