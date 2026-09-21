@@ -4,7 +4,7 @@ import { MachinePane } from './MachinePane';
 import { BorderProgress } from './BorderProgress';
 import type { MachineStats } from '../lib/useMachineStats';
 import type { Doc, Usage } from '../lib/utils';
-import { fetchDocStats, structuralSummary } from '../lib/utils';
+import { api, backendAddress, fetchDocStats, structuralSummary } from '../lib/utils';
 
 /* Pace of the indexing line: ms per KB, learned from past uploads on this machine. */
 const DEFAULT_MS_PER_KB = 20;
@@ -116,7 +116,7 @@ export function ContextPane({
     const controller = new AbortController();
     uploadAbort.current = controller;
     try {
-      const res = await fetch('http://localhost:8000/upload', {
+      const res = await fetch(api('/upload'), {
         method: 'POST',
         body: formData,
         signal: controller.signal,
@@ -162,7 +162,7 @@ export function ContextPane({
       } else if (rejection !== null) {
         setUploadError(`${file.name}: ${rejection}`);
       } else {
-        setUploadError('Upload failed — could not reach the backend on localhost:8000. Is it running?');
+        setUploadError(`Upload failed — could not reach the backend at ${backendAddress()}.`);
       }
     } finally {
       uploadAbort.current = null;
@@ -189,7 +189,7 @@ export function ContextPane({
 
   const removeDoc = async (name: string) => {
     try {
-      await fetch(`http://localhost:8000/document/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      await fetch(api(`/document/${encodeURIComponent(name)}`), { method: 'DELETE' });
     } catch {
       /* still remove from UI even if the network call fails */
     }

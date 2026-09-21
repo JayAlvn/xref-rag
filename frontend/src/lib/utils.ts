@@ -1,5 +1,39 @@
+import { invoke } from '@tauri-apps/api/core';
+
 /** Room kept clear at the right of the rightmost pane's header, under the floating toolbar. */
 export const TOOLBAR_CLEARANCE = 160;
+
+/* The backend's address. The desktop app reports it: the development server in
+   a debug build, the bundled backend on a free port in a release. A plain
+   browser (`npm run dev`) keeps the development server. */
+let apiBase = 'http://127.0.0.1:8000';
+
+export async function connectBackend(): Promise<void> {
+  try {
+    apiBase = await invoke<string>('backend_url');
+  } catch {
+    // Not inside the desktop app: keep the development address.
+  }
+}
+
+/** Full URL of a backend endpoint: api('/documents'). */
+export function api(path: string): string {
+  return `${apiBase}${path}`;
+}
+
+export function backendAddress(): string {
+  return apiBase;
+}
+
+/** True once the backend answers. */
+export async function backendIsUp(): Promise<boolean> {
+  try {
+    const res = await fetch(api('/health'));
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 /** One retrieved passage. Location fields are absent for documents indexed without structure. */
 export type RetrievalItem = {
@@ -198,7 +232,7 @@ export function structuralSummary(stats: DocStats): string {
 export async function fetchDocStats(name: string): Promise<DocStats | null> {
   try {
     const res = await fetch(
-      `http://localhost:8000/document/${encodeURIComponent(name)}/stats`,
+      api(`/document/${encodeURIComponent(name)}/stats`),
     );
     if (!res.ok) return null;
 
@@ -216,7 +250,7 @@ export async function fetchDocStats(name: string): Promise<DocStats | null> {
 export async function fetchDocuments(): Promise<Doc[] | null> {
   let res: Response;
   try {
-    res = await fetch('http://localhost:8000/documents');
+    res = await fetch(api('/documents'));
   } catch {
     return null;
   }
@@ -232,7 +266,7 @@ export async function fetchProvision(document: string, node: string): Promise<st
   const [kind, value] = node.split(':');
   if (!kind || value === undefined) return null;
 
-  const path = `http://localhost:8000/document/${encodeURIComponent(document)}/provision`;
+  const path = api(`/document/${encodeURIComponent(document)}/provision`);
   const query = `?kind=${encodeURIComponent(kind)}&value=${encodeURIComponent(value)}`;
 
   try {
@@ -264,7 +298,7 @@ export type Neighbours = {
 
 /** What a provision cites and what cites it (GET /document/{name}/neighbours). */
 export async function fetchNeighbours(document: string, node: string): Promise<Neighbours | null> {
-  const path = `http://localhost:8000/document/${encodeURIComponent(document)}/neighbours`;
+  const path = api(`/document/${encodeURIComponent(document)}/neighbours`);
 
   try {
     const res = await fetch(`${path}?node=${encodeURIComponent(node)}`);
