@@ -16,21 +16,33 @@ def _node_of(meta: dict) ->  str | None:
             return f"{kind}:{meta[kind]}"
     return None
 
+def _locator(meta: dict) -> str:
+    """Where inside the provision a reference sits: paragraph 2 · point e."""
+    parts = []
+    for kind in ("paragraph", "subparagraph", "point", "subpoint"):
+        if kind in meta:
+            parts.append(f"{kind} {meta[kind]}")
+
+    return " · ".join(parts)
+
 
 def build_edges(texts: list[str], metas: list[dict]) -> list[tuple]:
 
-    edges = set()
     nodes = set()
 
     for meta in metas:
         node = _node_of(meta)
         if node is not None:
             nodes.add(node)
-    
-    for text, meta in zip(texts, metas):
+
+    edges = []    
+    seen = set()
+
+    for position, (text, meta) in enumerate(zip(texts, metas)):
         source = _node_of(meta)
         if source is None:
             continue
+        locator = _locator(meta)
         for ref in extract_references(text):
             if ref["external"]:
                 target = f"ext:{ref['instrument']}"
@@ -43,10 +55,14 @@ def build_edges(texts: list[str], metas: list[dict]) -> list[tuple]:
                     edge_type = "internal"
                 else:
                     edge_type = "missing"
-        
-            edges.add((source, target, edge_type))
 
-    return sorted(edges)
+            key = (source, target, position)
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append((source, target, edge_type, position, locator))
+
+    return edges
 
 def build_graph(doc_name: str) -> int:
     texts, metas = get_document_chunks(doc_name)
