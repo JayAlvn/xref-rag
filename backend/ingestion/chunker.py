@@ -52,7 +52,20 @@ def _emit(text: str, start: int, page_of, labels: dict) -> list[dict]:
         found = text.find(piece[:60], cursor)
         if found >= 0:
             cursor = found
-        chunks.append({"text": piece, "page": page_of(start + cursor), **labels})
+        first = page_of(start + cursor)
+        last = page_of(start + cursor + len(piece) - 1)
+        chunks.append({"text": piece, "page": first, "page_end": last, **labels})
+    return chunks
+
+
+def with_printed_pages(chunks: list[dict], printed: dict[int, int]) -> list[dict]:
+    """Add the page numbers a reader sees, where the document prints them."""
+    for chunk in chunks:
+        if chunk.get("page") in printed:
+            chunk["printed_page"] = printed[chunk["page"]]
+        if chunk.get("page_end") in printed:
+            chunk["printed_page_end"] = printed[chunk["page_end"]]
+
     return chunks
 
 
@@ -88,7 +101,8 @@ def chunk_document(pages: list[tuple[int, str]]) -> list[dict]:
             del path[deeper]
         path[depth] = (kind, value)
 
-        labels = {k: v for k, v in path.values()}
+        # A list's closing text outside a paragraph ends the list but has no label of its own.
+        labels = {k: v for k, v in path.values() if v is not None}
         chunks += _emit(text[start:end], start, page_of, labels)
 
     return chunks
