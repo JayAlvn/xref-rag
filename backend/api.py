@@ -1,9 +1,12 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from embedding.vector_store import delete_document, get_document_stats, list_documents
-from pipeline.pipeline import ingest, answer_query
+from embedding.vector_store import (
+    delete_document, get_document_stats, list_documents, metadata_lookup,
+)
+from pipeline.pipeline import ingest, answer_query, retrieve
 from graph.store import delete_edges
+from graph.neighbourhood import neighbours_of
 from telemetry import snapshot
 import os, shutil
 
@@ -26,22 +29,37 @@ def health():
 def stats():
     return snapshot()
 
-
 @app.get("/document/{doc_name}/stats")
 def doc_stats_endpoint(doc_name: str):
     return get_document_stats(doc_name)
 
+
+@app.get("/document/{doc_name}/provision")
+def provision_endpoint(doc_name: str, kind: str, value: str):
+    """Every chunk of one provision, in reading order."""
+    where = value
+    if value.isdigit():
+        where = int(value)
+
+    chunks, _ = metadata_lookup({kind: where, "source": doc_name}, limit=200)
+
+    return chunks
+
+
+@app.get("/document/{doc_name}/neighbours")
+def neighbours_endpoint(doc_name: str, node: str):
+    """What one provision cites and what cites it: node is "article:66"."""
+    return neighbours_of(doc_name, node)
+
 class QueryRequest(BaseModel):
     query: str
-    mode: str = "basic"
     source: str | None = None
-    n: int = 6
 
 @app.post("/upload")
 def upload(file: UploadFile = File(...)):
 
     os.makedirs("uploads", exist_ok=True)
-    path = os.path.join("uploads", file.filename)
+    path = os.path.join("uploads", os.path.basename(file.filename))
 
     with open(path, "wb") as f:
         shutil.copyfileobj(file.file, f)
@@ -53,10 +71,17 @@ def upload(file: UploadFile = File(...)):
         "chunks_indexed":count,
     }
 
+
 @app.post("/query")
 def query_endpoint(request: QueryRequest):
-    return answer_query(request.query, request.mode, request.source, request.n)
+    """Answer a question: retrieval-augmented generation."""
+    return answer_query(request.query, request.source)
 
+
+@app.post("/retrieve")
+def retrieve_endpoint(request: QueryRequest):
+    """Find passages without an answer: behind the find: command."""
+    return retrieve(request.query, request.source)
 
 @app.get("/documents")
 def documents_endpoint():
