@@ -1,13 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { open } from '@tauri-apps/plugin-dialog';
 import { THEMES } from '../lib/themes';
-import type { SetupStatus } from '../lib/utils';
+import { checkStorage, type SetupStatus, type StorageCheck } from '../lib/utils';
 // Compiled into the app, so the notices travel with every copy of it.
 import ollamaLicense from '../../src-tauri/licenses/OLLAMA-LICENSE.txt?raw';
 import llamaNotice from '../../src-tauri/licenses/LLAMA-NOTICE.txt?raw';
 
 type SetupScreenProps = {
   status: SetupStatus;
-  onStart: () => void;
+  /** Starts setting up in `storage`; resolves to why it could not, or ''. */
+  onStart: (storage: string) => Promise<string>;
 };
 
 const colors = THEMES[0].colors;
@@ -30,6 +32,54 @@ function stepText(status: SetupStatus): string {
    software it installs. */
 export function SetupScreen({ status, onStart }: SetupScreenProps) {
   const [showLicense, setShowLicense] = useState(false);
+  // The folder field starts at the backend's suggestion; after that it is the user's.
+  const [folder, setFolder] = useState(status.storage.folder);
+  const [check, setCheck] = useState<StorageCheck>(status.storage);
+  const [refusal, setRefusal] = useState('');
+
+  // Check the folder as it is typed or picked, a moment after the last change.
+  useEffect(() => {
+    let current = true;
+    const timer = window.setTimeout(async () => {
+      if (folder.trim() === '') return;
+      const result = await checkStorage(folder);
+      if (current && result !== null) setCheck(result);
+    }, 300);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [folder]);
+
+  const browse = async () => {
+    try {
+      const picked = await open({ directory: true, defaultPath: folder, title: 'Where to keep Ollama and the model' });
+      if (typeof picked === 'string') {
+        // A fresh subfolder, so the chosen folder's own files are left alone.
+        let separator = '/';
+        if (picked.includes('\\')) separator = '\\';
+        let chosen = picked;
+        if (!picked.endsWith('xref-rag')) chosen = `${picked.replace(/[\\/]+$/, '')}${separator}xref-rag`;
+        setFolder(chosen);
+        setRefusal('');
+      }
+    } catch {
+      // No folder dialog outside the desktop app: the field can still be typed in.
+    }
+  };
+
+  // Where the files go matters only when Ollama itself is to be installed; a
+  // model for an Ollama the user already runs goes where that Ollama keeps them.
+  const choosing = status.needs.includes('runtime') && status.automatic
+    && (status.state === 'missing' || status.state === 'error');
+
+  const start = async () => {
+    setRefusal('');
+    let storage = '';
+    if (choosing) storage = folder;
+    const problem = await onStart(storage);
+    if (problem !== '') setRefusal(problem);
+  };
 
   let intro = '';
   let action = '';
@@ -94,15 +144,56 @@ export function SetupScreen({ status, onStart }: SetupScreenProps) {
           </div>
         )}
 
-        {status.state === 'error' && (
+        {choosing && (
+          <div className="mb-5">
+            <label className="mb-1.5 block text-[13px]" htmlFor="storage-folder">
+              Store Ollama and the model in
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="storage-folder"
+                value={folder}
+                onChange={(e) => {
+                  setFolder(e.target.value);
+                  setRefusal('');
+                }}
+                spellCheck={false}
+                className="min-w-0 flex-1 rounded-lg px-3 py-1.5 font-mono text-[12px] outline-none"
+                style={{ backgroundColor: colors.cardBg, border: `1px solid ${colors.border}`, color: colors.text }}
+              />
+              <button
+                type="button"
+                onClick={browse}
+                className="shrink-0 rounded-lg border px-3 py-1.5 text-[13px]"
+                style={{ borderColor: colors.border, color: colors.text }}
+              >
+                Browse…
+              </button>
+            </div>
+            {check.problem === '' && (
+              <p className="mt-1.5 text-[12px]" style={{ color: colors.textMuted }}>
+                About {gigabytes(check.needed_bytes)} needed · {gigabytes(check.free_bytes)} free on this drive
+              </p>
+            )}
+            {check.problem !== '' && (
+              <p className="mt-1.5 text-[12px]" style={{ color: '#fbbf24' }}>{check.problem}</p>
+            )}
+          </div>
+        )}
+
+        {status.state === 'error' && refusal === '' && (
           <p className="mb-5 text-[13px]" style={{ color: '#f87171' }}>{status.error}</p>
+        )}
+        {refusal !== '' && (
+          <p className="mb-5 text-[13px]" style={{ color: '#f87171' }}>{refusal}</p>
         )}
 
         {buttonText !== '' && status.state !== 'working' && (
           <button
             type="button"
-            onClick={onStart}
-            className="rounded-full px-5 py-2 text-sm font-medium"
+            onClick={start}
+            disabled={choosing && check.problem !== ''}
+            className="rounded-full px-5 py-2 text-sm font-medium disabled:opacity-50"
             style={{ backgroundColor: colors.accent, color: colors.accentText }}
           >
             {buttonText}

@@ -6,8 +6,6 @@ DATA_DIR = Path(os.environ.get("XREF_DATA_DIR", Path(__file__).resolve().parent)
 CHROMA_DIR = DATA_DIR / "chroma_db"
 UPLOADS_DIR = DATA_DIR / "uploads"
 EDGES_DB = DATA_DIR / "edges.db"
-OLLAMA_DIR = DATA_DIR / "ollama"
-MODELS_DIR = DATA_DIR / "models"
 
 # The language model, and the Ollama release fetched to run it on a computer
 # that has none. The checksums are those Ollama publishes for the release: a

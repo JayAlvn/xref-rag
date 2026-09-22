@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 
@@ -11,6 +12,8 @@ from retrieval.hybrid import route_search, is_reference_only
 from generation.basic_backend import BasicBackend, CONTEXT_WINDOW
 
 GENERATOR = BasicBackend()
+
+_log = logging.getLogger("xref")
 
 def ingest(doc_path: str) -> int:
     pages = load_document_pages(doc_path)
@@ -191,7 +194,19 @@ def answer_query(user_query: str, source: str | None = None) -> dict:
             question = "Explain in plain language what these passages say."
 
     t0 = time.perf_counter()
-    generated = GENERATOR.generate(question, result["sources"], focus)
+    try:
+        generated = GENERATOR.generate(question, result["sources"], focus)
+    except Exception as error:
+        # The passages were found; only the model failed. Say why, and keep
+        # the passages on screen.
+        _log.exception("generation failed")
+        reason = getattr(error, "error", None) or str(error) or error.__class__.__name__
+        generated = {
+            "finding": f"The language model could not answer: {reason}",
+            "detail": "",
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                      "context_window": CONTEXT_WINDOW},
+        }
     result["timings"]["generation_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
     result.update({key: value for key, value in generated.items() if key != "sources"})

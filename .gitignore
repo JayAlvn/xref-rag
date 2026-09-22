@@ -15,3 +15,5 @@ backend/models/
 backend/ollama.pid
 backend/ollama.log
 backend/ollama-download.part
+backend/storage.json
+backend/backend.log*

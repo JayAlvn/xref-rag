@@ -63,13 +63,13 @@ fn start_backend(_app: &tauri::App) -> Result<Backend, Box<dyn std::error::Error
 }
 
 /// Release: start the bundled backend on a free port, keeping its data in the
-/// app's data folder. Given this process's id, it exits by itself should the
+/// app's local data folder (not the roaming one: it holds gigabytes). Given this process's id, it exits by itself should the
 /// app crash before it can be stopped.
 #[cfg(not(debug_assertions))]
 fn start_backend(app: &tauri::App) -> Result<Backend, Box<dyn std::error::Error>> {
     use tauri_plugin_shell::ShellExt;
 
-    let data = app.path().app_data_dir()?;
+    let data = app.path().app_local_data_dir()?;
     std::fs::create_dir_all(&data)?;
     let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
     let port_arg = port.to_string();
@@ -97,6 +97,7 @@ fn start_backend(app: &tauri::App) -> Result<Backend, Box<dyn std::error::Error>
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let mut effect = "none";
             if let Some(window) = app.get_webview_window("main") {

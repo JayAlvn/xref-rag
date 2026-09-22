@@ -48,7 +48,41 @@ export type SetupStatus = {
   model: string;
   ollama_version: string;
   automatic: boolean;
+  /** Where Ollama and the model go, and whether they can. */
+  storage: StorageCheck;
+  suggested_storage: string;
 };
+
+/** GET /setup/check: `problem` is empty when the folder can be used. */
+export type StorageCheck = {
+  folder: string;
+  problem: string;
+  free_bytes: number;
+  needed_bytes: number;
+};
+
+/** Null while the backend cannot be reached. */
+export async function checkStorage(folder: string): Promise<StorageCheck | null> {
+  try {
+    const res = await fetch(api(`/setup/check?folder=${encodeURIComponent(folder)}`));
+    if (!res.ok) return null;
+    return await res.json() as StorageCheck;
+  } catch {
+    return null;
+  }
+}
+
+/** The message in a failed reply: FastAPI puts it in `detail`. */
+export async function errorText(res: Response): Promise<string> {
+  const text = await res.text();
+  try {
+    const body = JSON.parse(text);
+    if (body && typeof body.detail === 'string') return body.detail;
+  } catch {
+    // not JSON: show it as it is
+  }
+  return text;
+}
 
 /** Null while the backend cannot be reached. */
 export async function fetchSetup(): Promise<SetupStatus | null> {
@@ -61,12 +95,20 @@ export async function fetchSetup(): Promise<SetupStatus | null> {
   }
 }
 
-/** Starts the download in the backend; progress is read back with fetchSetup. */
-export async function beginSetup(): Promise<void> {
+/** Starts the download in the backend, into `storage`; progress is read back
+ *  with fetchSetup. Returns why it could not start, or '' when it did. */
+export async function beginSetup(storage: string): Promise<string> {
   try {
-    await fetch(api('/setup'), { method: 'POST' });
+    const res = await fetch(api('/setup'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // An empty storage keeps the folder already chosen or suggested.
+      body: JSON.stringify({ storage: storage || null }),
+    });
+    if (res.ok) return '';
+    return await errorText(res);
   } catch {
-    // The next fetchSetup reports whether it started.
+    return `Could not reach the backend at ${backendAddress()}.`;
   }
 }
 

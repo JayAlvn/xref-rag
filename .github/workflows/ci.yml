@@ -40,4 +40,4 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run model-free tests
-        run: pytest tests/test_ingestion.py tests/test_generation.py -v
+        run: pytest tests/test_ingestion.py tests/test_generation.py tests/test_runtime.py -v
