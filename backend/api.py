@@ -1,6 +1,8 @@
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from embedding.vector_store import (
@@ -24,6 +26,24 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title='X-REF-RAG API', lifespan=lifespan)
 
+_log = logging.getLogger("xref")
+
+
+# Any error becomes a JSON reply the window can read and show. Registered
+# before the CORS middleware, so it sits inside it and its replies carry the
+# CORS headers; an unhandled error would otherwise reach the window as a bare
+# "Failed to fetch".
+@app.middleware("http")
+async def readable_errors(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as error:
+        _log.exception("%s %s failed", request.method, request.url.path)
+        message = str(error)
+        if not message:
+            message = error.__class__.__name__
+        return JSONResponse(status_code=500, content={"detail": message})
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -42,11 +62,26 @@ def setup_status():
     """Whether the language model is ready, or what setting it up involves."""
     return runtime.status()
 
+class SetupRequest(BaseModel):
+    storage: str | None = None
+
 @app.post("/setup")
-def setup_begin():
-    """Download and start Ollama and the model, in the background."""
-    runtime.begin_setup()
+def setup_begin(request: SetupRequest | None = None):
+    """Download and start Ollama and the model, in the background, into the
+    folder chosen on the setup screen."""
+    folder = None
+    if request is not None:
+        folder = request.storage
+    try:
+        runtime.begin_setup(folder)
+    except ValueError as problem:
+        raise HTTPException(status_code=400, detail=str(problem))
     return runtime.status()
+
+@app.get("/setup/check")
+def setup_check(folder: str):
+    """Whether Ollama and the model can be kept in this folder."""
+    return runtime.check_storage(folder)
 
 @app.get("/stats")
 def stats():
