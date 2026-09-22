@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Group, Panel, Separator, type GroupImperativeHandle, type Layout } from 'react-resizable-panels';
 import { THEMES, ThemeColors } from './lib/themes';
 import type { RetrievalItem, Message, Turn, Lookup, Usage, Doc, RefGraphData } from './lib/utils';
-import { EMPTY_GRAPH, api, fetchDocStats, fetchDocuments, lookupLabel } from './lib/utils';
+import { EMPTY_GRAPH, api, errorText, fetchDocStats, fetchDocuments, lookupLabel } from './lib/utils';
 import { useMachineStats } from './lib/useMachineStats';
 import { MessageSquareIcon, PanelRightIcon } from './components/Icons';
 import { CitationPane } from './components/CitationPane';
@@ -324,8 +324,7 @@ function App() {
         signal: controller.signal,
       });
       if (!res.ok) {
-        const detail = await res.text();
-        throw new Error(`HTTP ${res.status} — ${detail}`);
+        throw new Error(await errorText(res));
       }
       const data = await res.json();
 
@@ -370,6 +369,8 @@ function App() {
     } catch (err) {
       let msg = 'Unknown error';
       if (err instanceof Error) msg = err.message;
+      // fetch itself failed: no reply came back at all.
+      if (err instanceof TypeError) msg = 'Could not reach the backend. Restart xref-rag if this persists.';
 
       let bubble = `Error: ${msg}`;
       if (controller.signal.aborted) bubble = 'Stopped. The backend may still be finishing this query.';
