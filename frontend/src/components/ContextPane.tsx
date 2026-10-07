@@ -4,7 +4,7 @@ import { MachinePane } from './MachinePane';
 import { BorderProgress } from './BorderProgress';
 import type { MachineStats } from '../lib/useMachineStats';
 import type { Doc, Usage } from '../lib/utils';
-import { api, backendAddress, fetchDocStats, structuralSummary } from '../lib/utils';
+import { apiFetch, backendAddress, fetchDocStats, structuralSummary } from '../lib/utils';
 
 /* Pace of the indexing line: ms per KB, learned from past uploads on this machine. */
 const DEFAULT_MS_PER_KB = 20;
@@ -116,7 +116,7 @@ export function ContextPane({
     const controller = new AbortController();
     uploadAbort.current = controller;
     try {
-      const res = await fetch(api('/upload'), {
+      const res = await apiFetch('/upload', {
         method: 'POST',
         body: formData,
         signal: controller.signal,
@@ -189,7 +189,7 @@ export function ContextPane({
 
   const removeDoc = async (name: string) => {
     try {
-      await fetch(api(`/document/${encodeURIComponent(name)}`), { method: 'DELETE' });
+      await apiFetch(`/document/${encodeURIComponent(name)}`, { method: 'DELETE' });
     } catch {
       /* still remove from UI even if the network call fails */
     }

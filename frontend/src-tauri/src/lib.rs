@@ -44,6 +44,7 @@ fn apply_backdrop(window: &tauri::WebviewWindow) -> &'static str {
 /// started it.
 struct Backend {
     url: String,
+    token: String,
     child: Mutex<Option<CommandChild>>,
 }
 
@@ -52,12 +53,20 @@ fn backend_url(state: tauri::State<Backend>) -> String {
     state.url.clone()
 }
 
+/// The secret the backend expects with every request. Empty in development,
+/// where the backend runs without one.
+#[tauri::command]
+fn backend_token(state: tauri::State<Backend>) -> String {
+    state.token.clone()
+}
+
 /// Development: the backend runs separately (uvicorn --reload) on port 8000,
 /// so code changes apply without rebuilding the bundled executable.
 #[cfg(debug_assertions)]
 fn start_backend(_app: &tauri::App) -> Result<Backend, Box<dyn std::error::Error>> {
     Ok(Backend {
         url: "http://127.0.0.1:8000".to_string(),
+        token: String::new(),
         child: Mutex::new(None),
     })
 }
@@ -74,12 +83,16 @@ fn start_backend(app: &tauri::App) -> Result<Backend, Box<dyn std::error::Error>
     let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
     let port_arg = port.to_string();
     let parent_arg = std::process::id().to_string();
+    // A new random secret each launch: only this app knows it, so nothing else
+    // on the computer (or a website in a browser) can use the backend.
+    let token = uuid::Uuid::new_v4().simple().to_string();
 
     let (mut output, child) = app
         .shell()
         .sidecar("backend")?
         .args(["--port", port_arg.as_str(), "--parent", parent_arg.as_str()])
         .env("XREF_DATA_DIR", data.to_string_lossy().to_string())
+        .env("XREF_TOKEN", token.clone())
         .spawn()?;
 
     // Keep reading its output: a full pipe would stall the backend.
@@ -89,6 +102,7 @@ fn start_backend(app: &tauri::App) -> Result<Backend, Box<dyn std::error::Error>
 
     Ok(Backend {
         url: format!("http://127.0.0.1:{port}"),
+        token,
         child: Mutex::new(Some(child)),
     })
 }
@@ -107,7 +121,7 @@ pub fn run() {
             app.manage(start_backend(app)?);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![backdrop, backend_url])
+        .invoke_handler(tauri::generate_handler![backdrop, backend_url, backend_token])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
