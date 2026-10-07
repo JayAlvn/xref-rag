@@ -1,20 +1,22 @@
 import logging
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from embedding.vector_store import (
-    delete_document, get_document_stats, list_documents, metadata_lookup,
-)
+from embedding.vector_store import delete_document, get_document_stats, list_documents, metadata_lookup
+
 from pipeline.pipeline import ingest, answer_query, retrieve
 from graph.store import delete_edges
 from graph.neighbourhood import neighbours_of
 from telemetry import snapshot
 from generation import runtime
 from settings import UPLOADS_DIR
+
 import os, shutil
+import secrets
 
 # Find (or start) the Ollama that answers questions when the server starts, and
 # stop the one this backend started when it shuts down.
@@ -44,11 +46,25 @@ async def readable_errors(request: Request, call_next):
             message = error.__class__.__name__
         return JSONResponse(status_code=500, content={"detail": message})
 
+
+_TOKEN = os.environ.get("XREF_TOKEN", "")
+
+@app.middleware("http")
+async def require_token(request: Request, call_next):
+    if _TOKEN == "" or request.method == "OPTIONS":
+        return await call_next(request)
+    sent = request.headers.get("x-xref-token", "")
+    if not secrets.compare_digest(sent, _TOKEN):
+        return JSONResponse(status_code=401, content={"detail": "Not allowed."})
+    return await call_next(request)
+
+_APP_ORIGINS =  ["http://localhost:1420", "tauri://localhost", "http://tauri.localhost"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_APP_ORIGINS,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type", "X-Xref-Token"],
 )
 
 @app.get("/health")

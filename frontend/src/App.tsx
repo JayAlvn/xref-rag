@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Group, Panel, Separator, type GroupImperativeHandle, type Layout } from 'react-resizable-panels';
 import { THEMES, ThemeColors } from './lib/themes';
 import type { RetrievalItem, Message, Turn, Lookup, Usage, Doc, RefGraphData } from './lib/utils';
-import { EMPTY_GRAPH, api, errorText, fetchDocStats, fetchDocuments, lookupLabel } from './lib/utils';
+import { EMPTY_GRAPH, apiFetch, errorText, fetchDocStats, fetchDocuments, lookupLabel } from './lib/utils';
 import { useMachineStats } from './lib/useMachineStats';
 import { MessageSquareIcon, PanelRightIcon } from './components/Icons';
 import { CitationPane } from './components/CitationPane';
@@ -308,8 +308,8 @@ function App() {
     const started = performance.now();
     let shown = prompt;
     if (label) shown = label;
-    let endpoint = api('/query');
-    if (lookupOnly) endpoint = api('/retrieve');
+    let endpoint = '/query';
+    if (lookupOnly) endpoint = '/retrieve';
 
     setMessages(prev => [...prev, { id: ++nextId.current, role: 'user', content: shown }]);
     setLoading(true);
@@ -317,7 +317,7 @@ function App() {
     const controller = new AbortController();
     queryAbort.current = controller;
     try {
-      const res = await fetch(endpoint, {
+      const res = await apiFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: prompt, source: activeDoc }),
