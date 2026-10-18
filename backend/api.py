@@ -167,4 +167,8 @@ def documents_endpoint():
 def delete_endpoint(doc_name: str):
     delete_document(doc_name)
     delete_edges(doc_name)
+
+    stored = UPLOADS_DIR / os.path.basename(doc_name)
+    if stored.exists():
+        stored.unlink()
     return {"deleted": doc_name}
