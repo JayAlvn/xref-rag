@@ -10,7 +10,9 @@ EDGES_DB = DATA_DIR / "edges.db"
 # The language model, and the Ollama release fetched to run it on a computer
 # that has none. The checksums are those Ollama publishes for the release: a
 # download that does not match is discarded unopened.
-MODEL = "llama3.2"
+
+MODEL = os.environ.get("XREF_MODEL", "llama3.2")
+
 OLLAMA_VERSION = "v0.30.10"
 OLLAMA_CHECKSUMS = {
     "ollama-linux-amd64.tar.zst": "046d8f28e58d58477a49558d8d1bcb2e81ca8b287f93c44b12ff919c10d178dd",

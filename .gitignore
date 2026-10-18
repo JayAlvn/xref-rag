@@ -17,3 +17,4 @@ backend/ollama.log
 backend/ollama-download.part
 backend/storage.json
 backend/backend.log*
+eval/results/
