@@ -5,20 +5,6 @@ const BLUE = '#3b82f6';
 const AMBER = '#f59e0b';
 const RED = '#ef4444';
 
-function Meter({ pct, color }: { pct: number; color: string }) {
-  return (
-    <div
-      className="h-1.5 w-full rounded-full overflow-hidden"
-      style={{ backgroundColor: 'var(--card-bg)' }}
-    >
-      <div
-        className="h-full rounded-full transition-all duration-300"
-        style={{ width: `${Math.min(100, Math.max(0, pct))}%`, backgroundColor: color }}
-      />
-    </div>
-  );
-}
-
 /* Green when cool, amber when warm, red when hot. */
 function heatColor(celsius: number): string {
   if (celsius >= 80) return RED;
@@ -26,7 +12,7 @@ function heatColor(celsius: number): string {
   return GREEN;
 }
 
-/* One device as grid cells: label, meter, load and temperature, with its memory underneath. */
+/* One device as a single row of grid cells: label, load, temperature and memory. */
 function DeviceRow({ label, pct, color, tempC, memory }: {
   label: string;
   pct: number;
@@ -44,14 +30,13 @@ function DeviceRow({ label, pct, color, tempC, memory }: {
   return (
     <>
       <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{label}</span>
-      <Meter pct={pct} color={color} />
       <span className="text-right text-sm font-semibold tabular-nums" style={{ color }}>
         {Math.round(pct)}%
       </span>
       <span className="text-right text-xs font-semibold tabular-nums" style={{ color: tempColor }}>
         {tempText}
       </span>
-      <span className="col-span-3 col-start-2 mb-1.5 text-[11px] tabular-nums" style={{ color: 'var(--text-muted)' }}>
+      <span className="text-right text-[11px] tabular-nums" style={{ color: 'var(--text-muted)' }}>
         {memory}
       </span>
     </>
@@ -76,8 +61,8 @@ export function MachinePane({
         Machine
       </h3>
 
-      {/* One grid for both devices, so their meters, loads and temperatures line up. */}
-      <div className="mb-3 grid grid-cols-[auto_1fr_auto_auto] items-center gap-x-3 gap-y-0.5">
+      {/* One grid for both devices, so their loads, temperatures and memory line up. */}
+      <div className="mb-3 grid grid-cols-[auto_auto_auto_1fr] items-center gap-x-3 gap-y-1">
         {gpu && (
           <DeviceRow
             label="GPU"

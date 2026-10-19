@@ -10,6 +10,61 @@ type ReferenceTreeProps = {
 
 const MAX_ROWS = 12;
 
+type PassageKind = 'heading' | 'paragraph' | 'point' | 'subpoint';
+
+// "Article 12 Record-keeping": the provision's own title, read before its text.
+const HEADING = /^(article|annex|section|chapter|part|title|recital|rule|clause|schedule)\s+[\dIVXLC]/i;
+const HEADING_MAX_LENGTH = 160;
+const LIST_MARKER = /^\(([a-z]{1,5})\)/;
+const ROMAN = /^[ivx]+$/;
+
+const PASSAGE_CLASS: Record<PassageKind, string> = {
+  heading: 'text-[16px] font-semibold',
+  paragraph: '',
+  point: 'pl-5',
+  subpoint: 'pl-10',
+};
+
+/* A lone (i), (v) or (x) is a point when it follows (h), (u) or (w), and a
+   sub-point otherwise; longer roman markers are always sub-points. */
+function isSubpoint(letters: string, lastPoint: string): boolean {
+  if (!ROMAN.test(letters)) return false;
+  if (letters.length > 1) return true;
+  const previous = String.fromCharCode(letters.charCodeAt(0) - 1);
+  return lastPoint !== previous;
+}
+
+/* How deep each passage sits in its provision, from the marker it opens with. */
+function passageKinds(passages: string[]): PassageKind[] {
+  const kinds: PassageKind[] = [];
+  let lastPoint = '';
+
+  passages.forEach((passage, index) => {
+    const text = passage.trim();
+    if (index === 0 && text.length <= HEADING_MAX_LENGTH && HEADING.test(text)) {
+      kinds.push('heading');
+      return;
+    }
+
+    const marker = LIST_MARKER.exec(text);
+    if (marker === null) {
+      kinds.push('paragraph');
+      return;
+    }
+
+    const letters = marker[1];
+    if (isSubpoint(letters, lastPoint)) {
+      kinds.push('subpoint');
+      return;
+    }
+
+    lastPoint = letters;
+    kinds.push('point');
+  });
+
+  return kinds;
+}
+
 /* Why a row cannot be opened, or "" when it can. */
 function closedNote(reference: Neighbour, path: string[]): string {
   if (reference.type === 'external') return 'other document';
@@ -90,8 +145,8 @@ function Row({ document, reference, path }: { document: string; reference: Neigh
               className="space-y-1 py-1 text-[14px] leading-relaxed"
               style={{ color: 'var(--text-main)', overflowWrap: 'anywhere' }}
             >
-              {text.map((passage, n) => (
-                <p key={n}>{stripPua(passage)}</p>
+              {passageKinds(text).map((kind, n) => (
+                <p key={n} className={PASSAGE_CLASS[kind]}>{stripPua(text[n])}</p>
               ))}
             </div>
           )}

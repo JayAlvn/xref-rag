@@ -6,6 +6,11 @@ import { useFold } from './useFold';
 export const LEFT_MIN = 20;
 export const CHAT_MIN = 20;
 
+// The starting shares of the window, in percent: citations, chat, context.
+export const DEFAULT_LEFT = 56;
+export const DEFAULT_CHAT = 22;
+export const DEFAULT_CONTEXT = 22;
+
 export function usePaneLayout() {
   const groupRef = useRef<GroupImperativeHandle | null>(null);
   const chatPanelRef = useRef<HTMLDivElement | null>(null);
@@ -20,9 +25,9 @@ export function usePaneLayout() {
   const [contextPin, setContextPin] = useState<number | null>(null);
 
   // The size each pane last had while open, in percent and in pixels.
-  const chatOpenShare = useRef(22);
+  const chatOpenShare = useRef(DEFAULT_CHAT);
   const chatOpenWidth = useRef(0);
-  const contextOpenShare = useRef(22);
+  const contextOpenShare = useRef(DEFAULT_CONTEXT);
   const contextOpenWidth = useRef(0);
 
   useEffect(() => {
@@ -111,6 +116,24 @@ export function usePaneLayout() {
     setContextVisible(opening);
   };
 
+  // Back to the starting layout, with every pane open at its default width.
+  const resetLayout = () => {
+    const group = groupRef.current;
+    if (!group) return;
+
+    chatOpenShare.current = DEFAULT_CHAT;
+    contextOpenShare.current = DEFAULT_CONTEXT;
+    const next: Layout = { left: DEFAULT_LEFT, chat: DEFAULT_CHAT, files: DEFAULT_CONTEXT };
+
+    fold.fold(
+      () => group.setLayout(next),
+      () => {},
+      () => {},
+    );
+    setChatVisible(true);
+    setContextVisible(true);
+  };
+
   // Dragging a pane below its minimum folds it. Sizes reported mid-fold are ignored.
   const onChatResize = (share: number) => {
     if (!fold.foldingRef.current) setChatVisible(share > 0);
@@ -131,6 +154,7 @@ export function usePaneLayout() {
     contextPin,
     toggleChat,
     toggleContext,
+    resetLayout,
     onChatResize,
     onContextResize,
   };
