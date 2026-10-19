@@ -3,6 +3,8 @@ import itertools
 import re
 from rank_bm25 import BM25Okapi
 from embedding.vector_store import semantic_rank, metadata_lookup
+from settings import ROUTING, RERANK
+from retrieval.rerank import rerank
 
 def _tokenize(text: str) -> list[str]:
     return re.findall(r"\w+", text.lower())
@@ -16,8 +18,8 @@ def _rrf(rank_list: list[list[str]], k: int = 60) -> dict:
             scores[_id] = scores.get(_id, 0.0) + 1.0 / (k + rank)
     return scores
 
-def hybrid_search(query_text: str, source: str | None = None, n: int = 6):
-    semantic = semantic_rank(query_text, source)
+def hybrid_search(query_text: str, source: str | None = None, n: int = 6, where: dict | None = None):
+    semantic = semantic_rank(query_text, source, where)
     if not semantic:
         return [], [], []
     ids = [s[0] for s in semantic]
@@ -361,6 +363,32 @@ def _present(metas: list[dict], asked: dict) -> dict:
     return present
 
 
+# Reranking reads a wider pool than plain hybrid keeps, then picks the best.
+_RERANK_POOL = 20 # hands to the reranker.
+_RERANK_KEEP = 6 # the reranker keeps for the prompt
+
+
+def _hybrid_note(asked: dict, route: str) -> dict:
+    return {
+        "exact": False,
+        "asked": asked,
+        "found": False,
+        "route": route,
+        "rerank": RERANK,
+    }
+
+
+def _full_hybrid(query_text: str, source: str | None, asked: dict):
+    if RERANK:
+        chunks, distances, metas = hybrid_search(query_text, source=source, n=_RERANK_POOL)
+        chunks, distances, metas = rerank(query_text, chunks, distances, metas, _RERANK_KEEP)
+    else:
+        chunks, distances, metas = hybrid_search(query_text, source=source, n=_CANDIDATES)
+        chunks, distances, metas = _close_to_best(chunks, distances, metas)
+
+    return chunks, distances, metas, _hybrid_note(asked, "hybrid")
+
+
 def route_search(query_text: str, source: str | None = None):
     """Retrieve for a query, picking exact lookup over similarity when possible.
 
@@ -371,12 +399,15 @@ def route_search(query_text: str, source: str | None = None):
     """
     asked = parse_subdivision(query_text)
 
+    if ROUTING == "hybrid":
+        return _full_hybrid(query_text, source, asked)
+
     for where in _filters(_groups(parse_identifier(query_text)), source):
         chunks, metas = metadata_lookup({}, limit=_CEILING, where=where)
         if not chunks:
             continue
 
-        note = {"exact": True, "asked": asked, "found": False}
+        note = {"exact": True, "asked": asked, "found": False, "route": "exact"}
         if asked:
             # "66(2)(e)" in a document whose article 66 has no paragraphs still
             # names point (e), so drop the outer labels before giving up.
@@ -395,7 +426,4 @@ def route_search(query_text: str, source: str | None = None):
         # Exact match on the requested identifier -- no similarity involved.
         return chunks, [0.0] * len(chunks), metas, note
 
-    chunks, distances, metas = _close_to_best(
-        *hybrid_search(query_text, source=source, n=_CANDIDATES))
-
-    return chunks, distances, metas, {"exact": False, "asked": asked, "found": False}
+    return _full_hybrid(query_text, source, asked)
