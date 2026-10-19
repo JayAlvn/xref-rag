@@ -168,7 +168,7 @@ def get_document_stats(doc_name: str) -> dict:
     return stats
 
 
-def semantic_rank(query_text: str, source: str | None = None):
+def semantic_rank(query_text: str, source: str | None = None, where: dict | None = None):
     ids_all, _ = get_all_chunks(source)
     total = len(ids_all)
     if total == 0:
@@ -176,7 +176,8 @@ def semantic_rank(query_text: str, source: str | None = None):
 
     query_vector = embed_text(query_text)
 
-    where  = {"source": source} if source else None
+    if where is None and source:
+        where = {"source": source}
 
     results = collection.query(
         query_embeddings = [query_vector],
