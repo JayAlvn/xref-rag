@@ -1,6 +1,10 @@
 import React from 'react';
 import { THEMES, ThemeColors } from '../lib/themes';
-import { MessageSquareIcon, PanelRightIcon } from './Icons';
+import { MessageSquareIcon, PanelRightIcon, RotateCcwIcon } from './Icons';
+
+// Lines the buttons up with a pane's header title, inside the pane's padding.
+const TOOLBAR_TOP = 21;
+const TOOLBAR_RIGHT = 22;
 
 function PaneToggle({ shown, label, onClick, children }: {
   shown: boolean;
@@ -11,7 +15,7 @@ function PaneToggle({ shown, label, onClick, children }: {
   let style: React.CSSProperties = { color: 'var(--text-muted)' };
   let action = `Show ${label}`;
   if (shown) {
-    style = { backgroundColor: 'var(--panel-bg)', color: 'var(--text-main)' };
+    style = { backgroundColor: 'var(--card-bg)', color: 'var(--text-main)' };
     action = `Hide ${label}`;
   }
   return (
@@ -50,27 +54,34 @@ function ThemeButton({ name, colors, selected, onClick }: {
   );
 }
 
-export function Toolbar({ chatVisible, contextVisible, onToggleChat, onToggleContext, theme, onSelectTheme }: {
+export function Toolbar({ chatVisible, contextVisible, onToggleChat, onToggleContext, onResetLayout, theme, onSelectTheme }: {
   chatVisible: boolean;
   contextVisible: boolean;
   onToggleChat: () => void;
   onToggleContext: () => void;
+  onResetLayout: () => void;
   theme: ThemeColors;
   onSelectTheme: (colors: ThemeColors) => void;
 }) {
   return (
-    <div className="absolute top-1.5 right-4 z-50">
-      {/* Solid, not blurred: WebKitGTK re-renders a backdrop blur slowly whenever the panes move. */}
-      <div
-        className="flex items-center gap-1 p-1 rounded-lg border shadow-sm"
-        style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--border-color)' }}
-      >
+    // No box of its own: it sits in the header row of whichever pane is rightmost.
+    <div className="absolute z-50" style={{ top: TOOLBAR_TOP, right: TOOLBAR_RIGHT }}>
+      <div className="flex items-center gap-1">
         <PaneToggle shown={chatVisible} label="chat" onClick={onToggleChat}>
           <MessageSquareIcon />
         </PaneToggle>
         <PaneToggle shown={contextVisible} label="context and documents" onClick={onToggleContext}>
           <PanelRightIcon />
         </PaneToggle>
+        <button
+          onClick={onResetLayout}
+          className="p-1.5 rounded transition-all"
+          style={{ color: 'var(--text-muted)' }}
+          title="Reset layout"
+          aria-label="Reset layout"
+        >
+          <RotateCcwIcon />
+        </button>
         <div className="w-px h-4 self-center mx-1" style={{ backgroundColor: 'var(--border-color)' }} />
         <div className="flex items-center gap-1.5 px-1">
           {THEMES.map((t) => (

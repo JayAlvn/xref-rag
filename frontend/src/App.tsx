@@ -5,7 +5,7 @@ import { useMachineStats } from './lib/useMachineStats';
 import { useGlass } from './lib/useGlass';
 import { useDocuments } from './lib/useDocuments';
 import { useConversation } from './lib/useConversation';
-import { usePaneLayout, LEFT_MIN, CHAT_MIN } from './lib/usePaneLayout';
+import { usePaneLayout, LEFT_MIN, CHAT_MIN, DEFAULT_LEFT, DEFAULT_CHAT, DEFAULT_CONTEXT } from './lib/usePaneLayout';
 import { Toolbar } from './components/Toolbar';
 import { CitationPane } from './components/CitationPane';
 import { ChatPane } from './components/ChatPane';
@@ -72,6 +72,7 @@ function App() {
         contextVisible={panes.contextVisible}
         onToggleChat={panes.toggleChat}
         onToggleContext={panes.toggleContext}
+        onResetLayout={panes.resetLayout}
         theme={theme}
         onSelectTheme={setTheme}
       />
@@ -79,7 +80,7 @@ function App() {
       <Group orientation="horizontal" className={groupClass} groupRef={panes.groupRef}>
         <Panel
           id="left"
-          defaultSize="56%"
+          defaultSize={`${DEFAULT_LEFT}%`}
           minSize={`${LEFT_MIN}%`}
           className="overflow-hidden rounded-lg border"
         >
@@ -101,7 +102,7 @@ function App() {
 
         <Panel
           id="chat"
-          defaultSize="22%"
+          defaultSize={`${DEFAULT_CHAT}%`}
           minSize={`${CHAT_MIN}%`}
           collapsible
           collapsedSize={0}
@@ -134,7 +135,7 @@ function App() {
 
         <Panel
           id="files"
-          defaultSize="22%"
+          defaultSize={`${DEFAULT_CONTEXT}%`}
           minSize="240px"
           collapsible
           collapsedSize={0}

@@ -28,13 +28,13 @@ export const THEMES: { name: string; colors: ThemeColors }[] = [
   {
     name: 'Daylight',
     colors: {
-      bg: '#E4E4E1',
-      panelBg: '#F2F2F2',
-      cardBg: '#E9E9E6',
-      text: '#2C2C29',
-      textMuted: '#5E5E59',
-      border: '#BDBDB7',    // lighter than the accent, so bar tracks stay visible under a filled bar
-      accent: '#2C2C29',
+      bg: '#E8E4D9',
+      panelBg: '#F4F1E8',
+      cardBg: '#EAE6DB',
+      text: '#101010',
+      textMuted: '#5C5A52',
+      border: '#D3CEC0',    // lighter than the accent, so bar tracks stay visible under a filled bar
+      accent: '#101010',
       accentText: '#FFFFFF',
       fontWeight: 500       // charcoal on off-white reads thin at regular weight
     }

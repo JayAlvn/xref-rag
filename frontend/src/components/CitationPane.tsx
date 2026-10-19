@@ -112,8 +112,8 @@ function CitationPaneView({
                       Source {idx + 1}
                       {where && (
                         <span
-                          className="ml-2 font-medium normal-case tracking-normal"
-                          style={{ color: 'var(--text-muted)' }}
+                          className="ml-2 text-[13px] font-bold normal-case tracking-normal"
+                          style={{ color: 'var(--text-main)' }}
                         >
                           {where}
                         </span>
