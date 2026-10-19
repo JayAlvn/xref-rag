@@ -7,7 +7,9 @@ from embedding.vector_store import embed_and_store_chunks
 
 from graph.build import build_graph
 from graph.neighbourhood import graph_for
-from retrieval.hybrid import route_search, is_reference_only
+
+from retrieval.router import route_search
+from retrieval.query_parsing import is_reference_only
 
 from generation.basic_backend import BasicBackend, CONTEXT_WINDOW
 
