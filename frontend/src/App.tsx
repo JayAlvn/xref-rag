@@ -89,6 +89,7 @@ function App() {
             retrieval={conversation.retrieval}
             graph={conversation.graph}
             lookup={conversation.lookup}
+            cited={conversation.cited}
             loading={conversation.loading}
             toolbarInset={citationsUnderToolbar}
           />

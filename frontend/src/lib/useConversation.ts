@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { RetrievalItem, Message, Turn, Lookup, Usage, Doc, RefGraphData } from './utils';
-import { EMPTY_GRAPH, apiFetch, errorText, lookupLabel } from './utils';
+import { EMPTY_GRAPH, apiFetch, citedSources, errorText, lookupLabel } from './utils';
 
 const EMPTY_USAGE: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, context_window: 4096 };
 
@@ -24,6 +24,7 @@ export function useConversation(
   const [retrieval, setRetrieval] = useState<RetrievalItem[]>([]);
   const [graph, setGraph] = useState<RefGraphData>(EMPTY_GRAPH);
   const [lookup, setLookup] = useState<Lookup | null>(null);
+  const [cited, setCited] = useState<number[]>([]);
 
   const [usage, setUsage] = useState<Usage>(EMPTY_USAGE);
   const [tokensBurned, setTokensBurned] = useState(0);
@@ -48,6 +49,7 @@ export function useConversation(
     setRetrieval(turn.retrieval);
     setGraph(turn.graph);
     setLookup(turn.lookup);
+    setCited(citedSources(`${turn.finding} ${turn.detail}`));
     setUsage(turn.usage);
   };
 
@@ -56,6 +58,7 @@ export function useConversation(
     setRetrieval([]);
     setGraph(EMPTY_GRAPH);
     setLookup(null);
+    setCited([]);
   };
 
   // Shows the evidence of an earlier answer again, without asking the backend.
@@ -191,6 +194,7 @@ export function useConversation(
     retrieval,
     graph,
     lookup,
+    cited,
     usage,
     tokensBurned,
     lastMs,

@@ -400,3 +400,15 @@ export async function fetchNeighbours(document: string, node: string): Promise<N
 export function stripPua(text: string): string {
   return text.replace(/[\uE000-\uF8FF]/g, '');
 }
+
+// The passage numbers an answer cites, first mention first: "[1] \u2026 [3, 4]" gives [1, 3, 4].
+export function citedSources(text: string): number[] {
+  const cited: number[] = [];
+  for (const match of text.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g)) {
+    for (const part of match[1].split(',')) {
+      const number = Number(part.trim());
+      if (!cited.includes(number)) cited.push(number);
+    }
+  }
+  return cited;
+}
