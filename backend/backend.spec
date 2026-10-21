@@ -24,6 +24,9 @@ hiddenimports += collect_submodules("uvicorn")
 word_list = os.path.join(os.path.dirname(wordninja.__file__), "wordninja", "wordninja_words.txt.gz")
 datas.append((word_list, "wordninja"))
 
+# The reranker model, downloaded by scripts/fetch_reranker.py before the build.
+datas.append((os.path.join(SPECPATH, "models", "reranker"), os.path.join("models", "reranker")))
+
 a = Analysis(
     ["main.py"],
     binaries=binaries,

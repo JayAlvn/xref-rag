@@ -13,7 +13,7 @@ EDGES_DB = DATA_DIR / "edges.db"
 
 MODEL = os.environ.get("XREF_MODEL", "llama3.2")
 ROUTING = os.environ.get("XREF_ROUTING", "v1")
-RERANK = os.environ.get("XREF_RERANK", "off") == "on"
+RERANK = os.environ.get("XREF_RERANK", "on") == "on"
 
 OLLAMA_VERSION = "v0.30.10"
 OLLAMA_CHECKSUMS = {
