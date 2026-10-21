@@ -57,6 +57,7 @@ jobs:
         working-directory: backend
         run: |
           pip install -r requirements.txt pyinstaller
+          python scripts/fetch_reranker.py
           pyinstaller backend.spec --noconfirm
 
       # Tauri looks for the backend under a name ending in the platform, such
