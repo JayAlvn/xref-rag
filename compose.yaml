@@ -1,0 +1,27 @@
+services:
+  ollama:
+    image: ollama/ollama:0.30.10
+    volumes:
+      - ./ollama_models:/root/.ollama/models
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build:
+      context: ./backend
+      network: host
+    environment:
+      OLLAMA_HOST: ollama:11434
+    volumes:
+      - xref-data:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+volumes:
+  xref-data:
