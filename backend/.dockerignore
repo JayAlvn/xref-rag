@@ -1,0 +1,17 @@
+venv/
+__pycache__/
+*.pyc
+build/
+dist/
+tests/
+models/
+chroma_db/
+uploads/
+edges.db
+ollama/
+ollama-unpacking/
+ollama.pid
+ollama.log
+ollama-download.part
+storage.json
+backend.log*
