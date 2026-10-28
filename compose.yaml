@@ -22,6 +22,15 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+  
+  frontend:
+    build:
+      context: ./frontend
+      network: host
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - backend
 
 volumes:
   xref-data:
